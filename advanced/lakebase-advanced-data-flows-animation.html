@@ -1,0 +1,553 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Lakebase data flows - from one compute to synced tables, CDF and managed DR</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root{--navy:#1B3139;--lava:#FF3621;--blue:#2272B4;--yellow:#FFAB00;--green:#00A972;--purple:#7A4FD6;--teal:#0B8F8F;--indigo:#4F5FD8;--oat:#F9F7F4;--gray:#C3CBD0;--ink:#1B3139;--muted:#5A6F77}
+  html,body{margin:0;height:100%;background:#E9E7E2;font-family:"DM Sans",Inter,"Segoe UI",Helvetica,Arial,sans-serif;overflow:hidden}
+  #stage{position:absolute;left:50%;top:50%;width:1280px;height:720px;transform-origin:center center;background:var(--oat);box-shadow:0 10px 40px rgba(0,0,0,.18);border-radius:6px;overflow:hidden}
+  svg{position:absolute;inset:0;width:1280px;height:720px}
+  .title{font-size:30px;font-weight:700;fill:var(--ink)}
+  .sub{font-size:17px;fill:var(--muted)}
+  .tag{font-size:15px;font-weight:700;fill:#fff;text-anchor:middle}
+  .band{fill:#fff;stroke:#DCE0E2;stroke-width:1.5}
+  .band.s{fill:#F1F3F4}
+  .bandlbl{font-size:12px;font-weight:700;letter-spacing:.14em;fill:var(--muted)}
+  .tier{fill:#fff;stroke:#CBD3D7;stroke-width:1.5}
+  .tierT{font-size:16px;font-weight:700;fill:var(--ink)}
+  .tierD{font-size:11.5px;fill:var(--muted)}
+  .chip{fill:#EEF1F3}
+  .chipT{font-size:10.5px;font-weight:700;fill:var(--muted);letter-spacing:.06em}
+  .node rect{transition:fill .25s,stroke .25s}
+  .pg rect{fill:var(--navy)}
+  .pg .nt{fill:#fff;font-size:20px;font-weight:700;text-anchor:middle}
+  .pg .ns{fill:#B9C6CB;font-size:12.5px;text-anchor:middle}
+  .pg.idle rect{fill:#AEB9BE}
+  .pg.idle.active rect{fill:var(--navy)}
+  .sn rect{fill:#F7F8F9;stroke:#CBD3D7;stroke-width:1.2}
+  .sn text{font-size:12px;fill:var(--ink);text-anchor:middle}
+  .sn .bt{font-size:13px;font-weight:700}
+  .sn .small{font-size:10px;fill:var(--muted)}
+  .seg rect{fill:#F7F8F9;stroke:#CBD3D7;stroke-dasharray:4 3}
+  .seg text{font-size:12.5px;fill:var(--ink);text-anchor:middle;font-weight:600}
+  .seg .small{font-size:10.5px;fill:var(--muted);font-weight:400}
+  .flash.pg rect{fill:#2C4D59}
+  .flash.sn rect{fill:#FFE9E5;stroke:var(--lava)}
+  .flash.sn.blue rect{fill:#E3EEF8;stroke:var(--blue)}
+  .flash.sn.purple rect{fill:#EFE8FC;stroke:var(--purple)}
+  .flash.sn.teal rect{fill:#DDF3F3;stroke:var(--teal)}
+  .flash.seg rect{fill:#FFF4DB;stroke:var(--yellow);stroke-dasharray:none}
+  .flash.seg.green rect{fill:#DDF5EC;stroke:var(--green)}
+  .flash.seg.indigo rect{fill:#E6E9FB;stroke:var(--indigo)}
+  .flow{fill:none;stroke:var(--gray);stroke-width:2;marker-end:url(#ah-gray);transition:stroke .3s,stroke-width .3s,opacity .3s;opacity:.75}
+  .flow.ack{stroke-dasharray:5 4}
+  .flow.on{opacity:1;stroke-width:3}
+  .flow.on.wal{stroke:var(--lava);marker-end:url(#ah-wal)}
+  .flow.on.page{stroke:var(--blue);marker-end:url(#ah-page)}
+  .flow.on.layer{stroke:var(--yellow);marker-end:url(#ah-layer)}
+  .flow.on.pq,.flow.on.ack{stroke:var(--green);marker-end:url(#ah-pq)}
+  .flow.on.sync{stroke:var(--purple);marker-end:url(#ah-sync)}
+  .flow.on.cdf{stroke:var(--teal);marker-end:url(#ah-cdf)}
+  .flow.on.dr{stroke:var(--indigo);marker-end:url(#ah-dr)}
+  .lbl{font-size:12.5px;font-weight:700;fill:var(--muted);paint-order:stroke;stroke:#F1F3F4;stroke-width:5px;stroke-linejoin:round}
+  .lbl.w{stroke:#fff}
+  .lbl.o{stroke:#F9F7F4}
+  .badge{opacity:0;transition:opacity .3s}
+  .badge.show{opacity:1}
+  .badge rect{fill:var(--navy)}
+  .badge.lava rect{fill:var(--lava)}
+  .badge.green rect{fill:var(--green)}
+  .badge.blue rect{fill:var(--blue)}
+  .badge.yellow rect{fill:#E89A00}
+  .badge.purple rect{fill:var(--purple)}
+  .badge.teal rect{fill:var(--teal)}
+  .badge.indigo rect{fill:var(--indigo)}
+  .badge text{fill:#fff;font-size:12px;font-weight:700;text-anchor:middle}
+  /* phased reveal */
+  .reveal{opacity:0;transition:opacity .8s;pointer-events:none}
+  .reveal.shown{opacity:1}
+  .reveal.shown.stopped{opacity:.35}
+  #core{transition:transform 1.2s cubic-bezier(.4,0,.2,1),opacity .6s;transform-origin:0 0;transform-box:view-box}
+  #core.down{opacity:.35}
+  /* the snapshot route is only drawn while snapshot mode is playing */
+  #p-snap:not(.on), #p-snap:not(.on) + text{opacity:0}
+  #p-snap + text{transition:opacity .3s}
+  .foot{font-size:11px;fill:#8A9AA0}
+  /* HTML overlays */
+  #panel{position:absolute;left:1010px;top:110px;width:240px;height:556px;background:#fff;border:1.5px solid #DCE0E2;border-radius:14px;padding:14px 14px 10px;box-sizing:border-box;color:var(--ink);display:flex;flex-direction:column}
+  #panel .k{font-size:10.5px;letter-spacing:.12em;font-weight:700;color:var(--lava)}
+  #panel h3{margin:6px 0 6px;font-size:17px;line-height:1.2}
+  #panel p{margin:0 0 6px;font-size:12.5px;line-height:1.42;color:#3C5560;min-height:124px}
+  #stepsrc{font-size:10.5px;color:#8A9AA0;font-style:italic;margin-bottom:8px;min-height:28px}
+  #steps{list-style:none;margin:0;padding:6px 0 0;border-top:1px solid #EEF1F3;overflow:auto;position:relative}
+  #steps li{font-size:11.5px;padding:2px 6px;border-radius:6px;cursor:pointer;color:var(--muted);display:flex;gap:6px;line-height:1.35}
+  #steps li b{color:var(--gray);width:18px;flex:none}
+  #steps li.ph{cursor:default;font-size:9.5px;letter-spacing:.12em;font-weight:700;color:#8A9AA0;padding-top:6px;text-transform:uppercase}
+  #steps li.cur{background:#FFF0ED;color:var(--ink);font-weight:700}
+  #steps li.cur b{color:var(--lava)}
+  #controls{position:absolute;left:40px;top:676px;display:flex;gap:8px;align-items:center}
+  #controls button,#controls select{font:600 12.5px "DM Sans",Inter,Arial,sans-serif;border:1.5px solid #CBD3D7;background:#fff;color:var(--ink);border-radius:8px;padding:6px 12px;cursor:pointer}
+  #controls button:hover{border-color:var(--navy)}
+  #controls #play{background:var(--navy);color:#fff;border-color:var(--navy);min-width:84px}
+  #legend{display:flex;gap:11px;margin-left:10px;font-size:11.5px;color:var(--muted)}
+  #legend span::before{content:"";display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:5px;vertical-align:-1px;background:var(--c)}
+  #bar{position:absolute;left:0;top:0;height:4px;background:var(--lava);width:0}
+</style>
+</head>
+<body>
+<div id="stage">
+<div id="bar"></div>
+<svg id="svg" viewBox="0 0 1280 720" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="ah-gray" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#C3CBD0"/></marker>
+    <marker id="ah-wal" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#FF3621"/></marker>
+    <marker id="ah-page" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#2272B4"/></marker>
+    <marker id="ah-layer" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#FFAB00"/></marker>
+    <marker id="ah-pq" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#00A972"/></marker>
+    <marker id="ah-sync" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#7A4FD6"/></marker>
+    <marker id="ah-cdf" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#0B8F8F"/></marker>
+    <marker id="ah-dr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#4F5FD8"/></marker>
+  </defs>
+
+  <!-- Header -->
+  <rect x="40" y="34" width="44" height="28" rx="6" fill="#FF3621"/><text x="62" y="53" class="tag">08</text>
+  <text x="100" y="58" class="title">Lakebase under the hood</text>
+  <text x="100" y="86" class="sub" id="sub">One stateless Postgres compute for reads and writes, on shared storage</text>
+
+  <!-- ===================== CORE (zooms out in phase 3) ===================== -->
+  <g id="core">
+    <!-- Compute band -->
+    <rect x="40" y="110" width="950" height="160" rx="14" class="band"/>
+    <text x="60" y="134" class="bandlbl">COMPUTE · BARE METAL HOSTS</text>
+    <g id="pg1" class="node pg"><rect x="120" y="148" width="300" height="98" rx="12"/><text x="270" y="193" class="nt">PostgreSQL</text><text x="270" y="217" class="ns">Stateless micro-VM · primary (R/W)</text></g>
+    <g class="reveal" data-level="2">
+      <g id="pg2" class="node pg"><rect x="580" y="148" width="300" height="98" rx="12"/><text x="730" y="193" class="nt">PostgreSQL</text><text x="730" y="217" class="ns">Stateless micro-VM · read replica (R/O)</text></g>
+    </g>
+
+    <!-- Storage band -->
+    <rect x="40" y="330" width="950" height="335" rx="14" class="band s"/>
+    <text x="60" y="354" class="bandlbl">MULTI-TENANT STORAGE</text>
+    <!-- Yellow outline: multi-tenant storage = pageservers + safekeepers (object storage sits outside) -->
+    <rect id="mts-outline" x="52" y="338" width="912" height="194" rx="12" fill="none" stroke="#FFAB00" stroke-width="2.5"/>
+
+    <!-- Pageservers -->
+    <rect x="90" y="372" width="370" height="150" rx="12" class="tier"/>
+    <text x="108" y="396" class="tierT">Pageservers ×2</text>
+    <rect x="388" y="382" width="60" height="20" rx="5" class="chip"/><text x="418" y="396" class="chipT" text-anchor="middle">NVMe SSD</text>
+    <text x="108" y="413" class="tierD">Reconstruct any page from its WAL deltas</text>
+    <text x="108" y="426" class="tierD">(write-through cache)</text>
+    <g id="ps1" class="node sn"><rect x="110" y="436" width="160" height="54" rx="9"/><text x="190" y="459">pageserver-1</text><text x="190" y="475" class="small">image + delta layers</text></g>
+    <g id="ps2" class="node sn"><rect x="285" y="436" width="160" height="54" rx="9"/><text x="365" y="459">pageserver-2</text><text x="365" y="475" class="small">image + delta layers</text></g>
+
+    <!-- Safekeepers -->
+    <rect x="560" y="372" width="390" height="150" rx="12" class="tier"/>
+    <text x="578" y="396" class="tierT">Safekeepers ×3</text>
+    <rect x="878" y="382" width="60" height="20" rx="5" class="chip"/><text x="908" y="396" class="chipT" text-anchor="middle">NVMe SSD</text>
+    <text x="578" y="413" class="tierD">Accept WAL into a durable quorum</text>
+    <text x="578" y="426" class="tierD">(one per availability zone)</text>
+    <g id="sk1" class="node sn"><rect x="575" y="436" width="112" height="54" rx="9"/><text x="631" y="459">safekeeper-1</text><text x="631" y="475" class="small">AZ-a</text></g>
+    <g id="sk2" class="node sn"><rect x="699" y="436" width="112" height="54" rx="9"/><text x="755" y="459">safekeeper-2</text><text x="755" y="475" class="small">AZ-b</text></g>
+    <g id="sk3" class="node sn"><rect x="823" y="436" width="112" height="54" rx="9"/><text x="879" y="459">safekeeper-3</text><text x="879" y="475" class="small">AZ-c</text></g>
+
+    <!-- Object storage -->
+    <rect x="90" y="542" width="860" height="108" rx="12" class="tier"/>
+    <text x="108" y="566" class="tierT">Object storage</text>
+    <text x="236" y="566" class="tierD">Durable, zone-redundant · S3 (AWS) · Blob (Azure) · GCS (GCP)</text>
+    <g id="os-layers" class="node seg"><rect x="105" y="580" width="270" height="58" rx="8"/><text x="240" y="604">Layer files</text><text x="240" y="621" class="small">page images + WAL deltas</text></g>
+    <g id="os-parquet" class="node seg green"><rect x="390" y="580" width="270" height="58" rx="8"/><text x="525" y="604">Parquet (columnar copy)</text><text x="525" y="621" class="small">row versions preserved · LTAP reads</text></g>
+    <g id="os-wal" class="node seg"><rect x="675" y="580" width="260" height="58" rx="8"/><text x="805" y="604">WAL archive</text><text x="805" y="621" class="small">history for PITR &amp; branching</text></g>
+
+    <!-- Core flow paths -->
+    <path id="p-pr-1"   class="flow page"  d="M 190 436 L 190 248"/>
+    <g class="reveal" data-level="2">
+      <path id="p-pr-2" class="flow page"  d="M 380 436 C 380 330, 640 330, 640 248"/>
+      <text x="650" y="276" class="lbl w">↑ Page reads (replica)</text>
+    </g>
+    <path id="p-wal-1"  class="flow wal"   d="M 330 246 C 330 330, 631 330, 631 434"/>
+    <path id="p-wal-2"  class="flow wal"   d="M 345 246 C 345 320, 755 320, 755 434"/>
+    <path id="p-wal-3"  class="flow wal"   d="M 360 246 C 360 310, 879 310, 879 434"/>
+    <path id="p-ack"    class="flow ack"   d="M 605 436 C 605 360, 405 360, 405 248"/>
+    <path id="p-sk-ps"  class="flow wal"   d="M 575 463 L 447 463"/>
+    <path id="p-layers" class="flow layer" d="M 190 490 L 190 578"/>
+    <path id="p-parquet" class="flow pq"   d="M 365 490 C 365 540, 525 530, 525 578"/>
+    <path id="p-archive" class="flow wal"  d="M 790 490 L 790 578"/>
+
+    <!-- Core flow labels -->
+    <text x="180" y="318" class="lbl w" text-anchor="end">↑ Page reads</text>
+    <text x="448" y="352" class="lbl">commit ack</text>
+    <text x="511" y="455" class="lbl w" text-anchor="middle">← WAL</text>
+    <text x="200" y="536" class="lbl w">↓ Layers</text>
+    <text x="452" y="536" class="lbl w" text-anchor="end">↓ Parquet</text>
+    <text x="800" y="536" class="lbl w">↓ WAL archive</text>
+
+    <!-- Core badges -->
+    <g id="b-pg1" class="badge"><rect x="155" y="136" width="230" height="24" rx="12"/><text x="270" y="152"></text></g>
+    <g id="b-pg2" class="badge"><rect x="610" y="136" width="240" height="24" rx="12"/><text x="730" y="152"></text></g>
+    <g id="b-ps"  class="badge"><rect x="135" y="360" width="280" height="24" rx="12"/><text x="275" y="376"></text></g>
+    <g id="b-sk"  class="badge"><rect x="655" y="360" width="200" height="24" rx="12"/><text x="755" y="376"></text></g>
+    <g id="b-os"  class="badge"><rect x="400" y="530" width="250" height="24" rx="12"/><text x="525" y="546"></text></g>
+
+    <g id="packets-core"></g>
+  </g>
+
+  <!-- ===================== PHASE 3a: Lakehouse / Unity Catalog + Synced tables ===================== -->
+  <g id="lh-sync" class="reveal" data-level="3">
+    <rect x="668" y="110" width="322" height="366" rx="14" class="band"/>
+    <text x="686" y="131" class="bandlbl">LAKEHOUSE · UNITY CATALOG</text>
+    <g id="pipe" class="node sn purple"><rect x="688" y="140" width="282" height="46" rx="9"/><text x="829" y="159" class="bt">Synced table pipeline</text><text x="829" y="176" class="small">managed Lakeflow · snapshot / triggered / continuous</text></g>
+    <g id="uc-src" class="node sn purple"><rect x="688" y="222" width="282" height="46" rx="9"/><text x="829" y="241" class="bt">analytics.gold.user_profiles</text><text x="829" y="258" class="small">UC source · Delta, Iceberg or view</text></g>
+    <path id="p-sync-src" class="flow sync" d="M 829 222 L 829 188"/>
+    <path id="p-sync" class="flow sync" d="M 829 140 L 829 103 L 214 103 Q 200 103 200 117 L 200 133"/>
+    <text x="838" y="210" class="lbl w">↑ sync</text>
+    <text x="700" y="99" class="lbl o" text-anchor="end">← synced rows into Postgres (read-only table)</text>
+    <!-- Snapshot mode: bulk write straight into the layer files (routed below the core), then one transaction via the primary -->
+    <path id="p-snap" class="flow sync" d="M 688 176 L 678 176 L 678 484 L 172 484 L 172 461"/>
+    <text x="420" y="498" class="lbl o" text-anchor="middle">↑ snapshot: bulk write to layer files</text>
+  </g>
+
+  <!-- ===================== PHASE 3b: Lakebase CDF ===================== -->
+  <g id="lh-cdf" class="reveal" data-level="4">
+    <g id="cdf" class="node sn teal"><rect x="688" y="296" width="282" height="46" rx="9"/><text x="829" y="315" class="bt">Lakebase CDF</text><text x="829" y="332" class="small">changes captured from the WAL · batched ~15 s</text></g>
+    <g id="hist" class="node sn teal"><rect x="688" y="392" width="282" height="66" rx="9"/><text x="829" y="413" class="bt">lb_orders_history</text><text x="829" y="430" class="small">UC managed Delta table</text><text x="829" y="446" class="small">_pg_change_type · _pg_lsn · _pg_xid · _timestamp</text></g>
+    <path id="p-cdf-1" class="flow cdf" d="M 642 322 L 686 322"/>
+    <path id="p-cdf-2" class="flow cdf" d="M 829 342 L 829 390"/>
+    <text x="664" y="314" class="lbl w" text-anchor="middle">WAL</text>
+    <text x="838" y="371" class="lbl w">↓ append</text>
+  </g>
+
+  <!-- ===================== PHASE 3c: Managed DR ===================== -->
+  <g id="dr" class="reveal" data-level="5">
+    <rect x="40" y="494" width="950" height="171" rx="14" class="band s"/>
+    <text x="60" y="516" class="bandlbl">SECONDARY REGION · LAKEBASE MANAGED DR</text>
+    <g id="sec-pg" class="node pg idle"><rect x="70" y="532" width="270" height="80" rx="12"/><text x="205" y="566" class="nt">PostgreSQL</text><text x="205" y="590" class="ns" id="sec-pg-sub">secondary · idle until failover</text></g>
+    <rect x="400" y="532" width="300" height="118" rx="12" class="tier"/>
+    <text x="416" y="554" class="tierT">Replicated storage</text>
+    <text x="416" y="571" class="tierD">Committed data, incl. synced tables</text>
+    <g id="sec-data" class="node seg indigo"><rect x="414" y="580" width="272" height="56" rx="8"/><text x="550" y="604">Lakebase data (replica copy)</text><text x="550" y="621" class="small">behind primary by the replication lag</text></g>
+    <rect x="728" y="532" width="244" height="118" rx="12" class="tier"/>
+    <text x="744" y="554" class="tierT">On failover</text>
+    <text x="744" y="574" class="tierD">• Manual, triggered by a Project Admin</text>
+    <text x="744" y="591" class="tierD">• New connection string and token</text>
+    <text x="744" y="608" class="tierD">• Sync and CDF pipelines terminate;</text>
+    <text x="754" y="623" class="tierD">reconfigure them manually</text>
+    <text x="744" y="640" class="tierD">• CDF Delta tables are not replicated</text>
+    <path id="p-dr" class="flow dr" d="M 630 467 L 630 578"/>
+    <path id="p-sec-read" class="flow page" d="M 412 600 L 342 600"/>
+    <text x="640" y="488" class="lbl o">↓ periodic replication (storage layer)</text>
+    <text x="377" y="590" class="lbl" text-anchor="middle">pages</text>
+  </g>
+
+  <!-- Global badges (kept outside the dimmable groups) -->
+  <g id="b-pipe" class="badge"><rect x="689" y="128" width="280" height="24" rx="12"/><text x="829" y="144"></text></g>
+  <g id="b-cdf"  class="badge"><rect x="689" y="284" width="280" height="24" rx="12"/><text x="829" y="300"></text></g>
+  <g id="b-hist" class="badge"><rect x="689" y="380" width="280" height="24" rx="12"/><text x="829" y="396"></text></g>
+  <g id="b-sec"  class="badge"><rect x="55" y="520" width="300" height="24" rx="12"/><text x="205" y="536"></text></g>
+  <g id="b-dr"   class="badge"><rect x="415" y="624" width="270" height="24" rx="12"/><text x="550" y="640"></text></g>
+
+  <g id="packets"></g>
+
+  <text x="1250" y="704" class="foot" text-anchor="end">© 2026 Databricks Inc. — All rights reserved</text>
+</svg>
+
+<div id="panel">
+  <div class="k" id="stepk"></div>
+  <h3 id="steph"></h3>
+  <p id="stepp"></p>
+  <div id="stepsrc"></div>
+  <ul id="steps"></ul>
+</div>
+
+<div id="controls">
+  <button id="prev" title="Previous step (←)">◀ Prev</button>
+  <button id="play" title="Play / pause (space)">❚❚ Pause</button>
+  <button id="next" title="Next step (→)">Next ▶</button>
+  <select id="speed" title="Speed"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="1.5">1.5×</option><option value="2">2×</option></select>
+  <button id="auto" title="Auto-advance steps">Auto: on</button>
+  <div id="legend"><span style="--c:#FF3621">WAL</span><span style="--c:#2272B4">Pages</span><span style="--c:#FFAB00">Layers</span><span style="--c:#00A972">Parquet/ack</span><span style="--c:#7A4FD6">Synced rows</span><span style="--c:#0B8F8F">CDF</span><span style="--c:#4F5FD8">DR</span></div>
+</div>
+</div>
+
+<script>
+(function(){
+  const NS = 'http://www.w3.org/2000/svg';
+  const $ = id => document.getElementById(id);
+
+  // ---------- fit to window ----------
+  function fit(){ const s = Math.min(innerWidth/1300, innerHeight/740); $('stage').style.transform = `translate(-50%,-50%) scale(${s})`; }
+  addEventListener('resize', fit); fit();
+
+  // ---------- simulation clock (pausable) ----------
+  let simT = 0, last = performance.now(), playing = true, speed = 1, auto = true;
+  let timers = [], packets = [], stageIdx = 0, stageStart = 0, stageDur = 1, cdfBuf = 0;
+  const after = (ms, fn) => timers.push({at: simT + ms, fn});
+  const every = (ms, total, fn) => { for (let t = 0; t < total; t += ms) after(t, fn); };
+  const ease = t => t < .5 ? 2*t*t : 1 - Math.pow(-2*t + 2, 2)/2;
+
+  const COLORS = {wal:'#FF3621', page:'#2272B4', layer:'#FFAB00', pq:'#00A972', ack:'#00A972', sync:'#7A4FD6', sbatch:'#7A4FD6', cdf:'#0B8F8F', batch:'#0B8F8F', dr:'#4F5FD8'};
+  function makeShape(kind){
+    const g = document.createElementNS(NS, 'g');
+    const c = COLORS[kind];
+    if (kind === 'wal' || kind === 'ack' || kind === 'cdf') {
+      const e = document.createElementNS(NS, 'circle');
+      e.setAttribute('r', kind === 'wal' ? 7 : 6); e.setAttribute('fill', c);
+      e.setAttribute('stroke', '#fff'); e.setAttribute('stroke-width', 2); g.appendChild(e);
+    } else if (kind === 'pq') {
+      for (let i = 0; i < 3; i++) { const r = document.createElementNS(NS, 'rect');
+        r.setAttribute('x', -8 + i*5.5); r.setAttribute('y', -8); r.setAttribute('width', 4.5); r.setAttribute('height', 16); r.setAttribute('rx', 1);
+        r.setAttribute('fill', c); g.appendChild(r); }
+    } else {
+      const big = kind === 'batch' || kind === 'sbatch';
+      const r = document.createElementNS(NS, 'rect');
+      r.setAttribute('x', big ? -12 : -9); r.setAttribute('y', big ? -9 : -7); r.setAttribute('width', big ? 24 : 18); r.setAttribute('height', big ? 18 : 14); r.setAttribute('rx', 2.5);
+      r.setAttribute('fill', c); r.setAttribute('stroke', '#fff'); r.setAttribute('stroke-width', 1.5); g.appendChild(r);
+    }
+    return g;
+  }
+  // Packets are always placed in the same coordinate system as their path, and always move start -> end (arrow direction)
+  function send(pathId, kind, dur, opts = {}){
+    const path = $(pathId); const el = makeShape(kind);
+    (path.closest('#core') ? $('packets-core') : $('packets')).appendChild(el);
+    const p = {path, el, len: path.getTotalLength(), start: simT, dur, onArrive: opts.onArrive};
+    place(p, 0); packets.push(p);
+  }
+  function place(p, t){ const pt = p.path.getPointAtLength(p.len * ease(t)); p.el.setAttribute('transform', `translate(${pt.x},${pt.y})`); }
+
+  function flash(id, ms = 500){ const n = $(id); n.classList.add('flash'); after(ms, () => n.classList.remove('flash')); }
+  function badge(id, text, cls = '', ms = 0){ const b = $(id); b.querySelector('text').textContent = text; b.setAttribute('class', 'badge show ' + cls); if (ms) after(ms, () => b.classList.remove('show')); }
+
+  function tick(){
+    timers.sort((a, b) => a.at - b.at);
+    while (timers.length && timers[0].at <= simT) timers.shift().fn();
+    for (const p of packets) {
+      const t = (simT - p.start) / p.dur;
+      if (t >= 1) { p.el.remove(); p.done = true; if (p.onArrive) p.onArrive(); continue; }
+      place(p, t);
+    }
+    packets = packets.filter(p => !p.done);
+    $('bar').style.width = Math.min(100, (simT - stageStart) / stageDur * 100) + '%';
+  }
+  function frame(now){ const dt = Math.min(now - last, 50); last = now; if (playing) { simT += dt * speed; tick(); } requestAnimationFrame(frame); }
+
+  // ---------- phase / level handling ----------
+  // 1 = one compute, 2 = + read replica, 3 = + synced tables, 4 = + CDF, 5 = + managed DR
+  const SUB = {
+    1: 'One stateless Postgres compute for reads and writes, on shared storage',
+    2: 'Add a read replica: more compute, same storage, no data copied',
+    3: 'Synced tables: Unity Catalog data served from Lakebase',
+    4: 'Lakebase CDF: every Postgres change lands in the lakehouse',
+    5: 'Lakebase Managed DR: storage-layer replication to another region'
+  };
+  function applyLevel(lv){
+    document.querySelectorAll('.reveal').forEach(g => g.classList.toggle('shown', +g.dataset.level <= lv));
+    $('core').style.transform = lv >= 3 ? 'translate(13.6px,37.4px) scale(0.66)' : 'none';
+    $('sub').textContent = SUB[lv];
+  }
+  function setFailover(on){
+    $('core').classList.toggle('down', on);
+    $('lh-sync').classList.toggle('stopped', on); $('lh-cdf').classList.toggle('stopped', on);
+    $('sec-pg').classList.toggle('active', on);
+    $('sec-pg-sub').textContent = on ? 'promoted to primary (R/W)' : 'secondary \u00b7 idle until failover';
+  }
+
+  // ---------- flow helpers ----------
+  function commit(withAck = true){
+    badge('b-pg1', 'INSERT \u2026 ; COMMIT', '', 1600);
+    let acks = 0;
+    [1100, 1350, 2100].forEach((d, i) => after(i * 60, () => send('p-wal-' + (i + 1), 'wal', d, {onArrive: () => {
+      flash('sk' + (i + 1)); acks++;
+      if (acks === 2 && withAck) {
+        badge('b-sk', 'Quorum 2 of 3 \u2713', 'green', 1400);
+        send('p-ack', 'ack', 950, {onArrive: () => { flash('pg1'); badge('b-pg1', 'COMMIT acknowledged \u2713', 'green', 1200); }});
+      }
+    }})));
+  }
+  const streamWal = () => send('p-sk-ps', 'wal', 700, {onArrive: () => flash(Math.random() < .5 ? 'ps1' : 'ps2')});
+  const flushLayer = () => send('p-layers', 'layer', 800, {onArrive: () => flash('os-layers')});
+  const flushParquet = () => send('p-parquet', 'pq', 1000, {onArrive: () => flash('os-parquet')});
+  const archive = () => send('p-archive', 'wal', 800, {onArrive: () => flash('os-wal')});
+  // Read path: show the miss, the pageserver rebuilding the page, then the page flowing up the arrow
+  function pageRead(which, q = 'SELECT \u2026 buffer-cache miss'){
+    const pg = which === 1 ? 'pg1' : 'pg2', path = which === 1 ? 'p-pr-1' : 'p-pr-2', ps = which === 1 ? 'ps1' : 'ps2', b = which === 1 ? 'b-pg1' : 'b-pg2';
+    badge(b, q, 'blue', 1300);
+    after(700, () => {
+      $(ps).classList.add('blue'); flash(ps, 900); after(900, () => $(ps).classList.remove('blue'));
+      badge('b-ps', 'GetPage@LSN \u2192 image + WAL deltas', 'blue', 1300);
+      after(650, () => send(path, 'page', 950, {onArrive: () => { flash(pg); badge(b, 'Page returned \u2192 rows sent', 'blue', 1200); }}));
+    });
+  }
+  // Synced tables: UC source -> managed pipeline -> rows written into Postgres (then the normal write path)
+  function syncRows(){
+    flash('uc-src');
+    send('p-sync-src', 'sync', 700, {onArrive: () => {
+      flash('pipe'); badge('b-pipe', 'Sync pipeline \u00b7 continuous mode', 'purple', 1500);
+      send('p-sync', 'sync', 1500, {onArrive: () => { flash('pg1'); badge('b-pg1', 'Apply synced rows', 'purple', 900); after(500, () => commit()); }});
+    }});
+  }
+  // Lakebase CDF: changes from the WAL are buffered, then appended to a UC Delta history table in batches
+  const cdfChange = () => send('p-cdf-1', 'cdf', 650, {onArrive: () => {
+    flash('cdf'); cdfBuf++; badge('b-cdf', `Batching ${cdfBuf} change${cdfBuf > 1 ? 's' : ''} (flush ~15 s)`, 'teal');
+  }});
+  function cdfFlush(){
+    if (!cdfBuf) return; const k = cdfBuf; cdfBuf = 0;
+    badge('b-cdf', 'Flush batch \u2192 Delta', 'teal', 900);
+    send('p-cdf-2', 'batch', 900, {onArrive: () => { flash('hist'); badge('b-hist', `+${k} rows \u00b7 _pg_change_type, _pg_lsn`, 'teal', 1600); }});
+  }
+  // Managed DR: periodic storage-layer replication to the secondary region
+  function drBurst(){
+    badge('b-dr', 'Periodic replication \u00b7 RPO in minutes', 'indigo', 1800);
+    for (let i = 0; i < 4; i++) after(i * 160, () => send('p-dr', 'dr', 1000, {onArrive: () => flash('sec-data')}));
+  }
+  const secRead = () => send('p-sec-read', 'page', 650, {onArrive: () => flash('sec-pg')});
+
+  // ---------- sources (shown under the narration) ----------
+  const S = {
+    arch: 'Databricks docs: Lakebase architecture',
+    deck: 'Deck slide 16 (Lakebase under the hood)',
+    rr: 'Databricks docs: Read replicas',
+    sync: 'Databricks docs: Serve lakehouse data with synced tables',
+    cdf: 'Databricks docs: Lakebase Change Data Feed (Public Preview); safekeepers hold the WAL per the architecture docs',
+    dr: 'Databricks docs: Lakebase Disaster Recovery (Private Preview)'
+  };
+
+  // ---------- stages ----------
+  const P1 = 'Phase 1 \u00b7 One compute', P2 = 'Phase 2 \u00b7 Read replica', P3A = 'Phase 3a \u00b7 Synced tables', P3B = 'Phase 3b \u00b7 Lakebase CDF', P3C = 'Phase 3c \u00b7 Managed DR', PALL = 'All together';
+  const WRITE = ['p-wal-1','p-wal-2','p-wal-3','p-ack'];
+  const STAGES = [
+    { ph: P1, lv: 1, t: 'Write path: commit', on: WRITE, dur: 5200, src: S.arch,
+      d: 'A single stateless Postgres compute handles both reads and writes. It streams WAL to three safekeepers, and a transaction commits once a quorum (2 of 3) acknowledges it.',
+      run(){ commit(); after(2700, () => commit()); } },
+    { ph: P1, lv: 1, t: 'WAL to pageservers', on: ['p-sk-ps'], dur: 5000, src: S.arch,
+      d: 'Safekeepers stream WAL to the pageservers, which apply it asynchronously, off the commit path. Pageservers act as a write-through cache above object storage.',
+      run(){ badge('b-ps', 'Ingest WAL \u2192 in-memory layer', 'lava'); every(380, 4200, streamWal); } },
+    { ph: P1, lv: 1, t: 'Flush to object storage', on: ['p-layers','p-parquet'], dur: 5600, src: S.arch + '; Parquet copy: ' + S.deck,
+      d: 'Pageservers persist layer files (page images plus WAL deltas) to object storage. The same flush also writes a columnar Parquet copy.',
+      run(){ badge('b-ps', 'Flush layers', 'yellow'); every(650, 4800, flushLayer); after(250, () => every(650, 4600, flushParquet));
+             after(900, () => badge('b-os', 'Parquet copy: row versions preserved', 'green')); } },
+    { ph: P1, lv: 1, t: 'WAL archive', on: ['p-archive'], dur: 4000, src: S.deck,
+      d: 'Safekeepers archive WAL to durable, zone-redundant object storage: the history behind point-in-time restore and branching.',
+      run(){ badge('b-sk', 'Archive WAL segments', 'lava'); every(420, 3400, archive); } },
+    { ph: P1, lv: 1, t: 'Read path: same compute', on: ['p-pr-1'], dur: 5800, src: S.arch,
+      d: 'On a buffer-cache miss, the same compute requests a page at an LSN. The pageserver reconstructs it and returns it. Only pageservers read from object storage.',
+      run(){ pageRead(1); after(3000, () => pageRead(1)); } },
+    { ph: P1, lv: 1, t: 'One compute, all flows', on: [...WRITE,'p-sk-ps','p-layers','p-parquet','p-archive','p-pr-1'], dur: 9000, src: S.arch + '; ' + S.deck,
+      d: 'All phase 1 flows together: one compute writes WAL and reads pages, while storage persists, archives and serves the data.',
+      run(){ every(2000, 8000, () => commit()); every(450, 8600, streamWal); every(1100, 8600, flushLayer);
+             after(400, () => every(1100, 8200, flushParquet)); every(900, 8600, archive);
+             after(1200, () => pageRead(1)); after(5200, () => pageRead(1)); } },
+
+    { ph: P2, lv: 2, t: 'Add a read replica', on: ['p-pr-2'], dur: 5800, src: S.rr,
+      d: 'A read replica is another compute attached to the same storage. Nothing is copied, so it is ready in seconds with no extra storage cost, and it scales (and scales to zero) on its own.',
+      run(){ flash('pg2', 900); badge('b-pg2', 'New compute \u00b7 ready in seconds', '', 1800); after(2200, () => pageRead(2)); } },
+    { ph: P2, lv: 2, t: 'Read scaling', on: [...WRITE,'p-sk-ps','p-pr-1','p-pr-2'], dur: 9000, src: S.rr,
+      d: 'Writes still go only to the primary. Reads spread across the primary and the replica, and both fetch pages from the same pageservers.',
+      run(){ every(2200, 8000, () => commit()); every(500, 8600, streamWal);
+             after(600, () => pageRead(2)); after(2000, () => pageRead(1)); after(3600, () => pageRead(2)); after(5200, () => pageRead(1)); after(6600, () => pageRead(2)); } },
+
+    { ph: P3A, lv: 3, sub: 'a', t: 'Synced tables: Snapshot', on: ['p-sync-src','p-snap','p-sync',...WRITE,'p-pr-2'], dur: 30000,
+      src: 'Your description (bulk write to layer files, then one transaction via the primary); sync modes: ' + S.sync,
+      d: 'Snapshot mode copies the full Unity Catalog table. The pipeline writes the rows directly into layer files in storage, bypassing Postgres, then fires one transaction through the primary.',
+      run(){
+        after(1400, () => badge('b-pipe', 'Snapshot \u00b7 full copy of the source', 'purple'));
+        after(1600, () => every(500, 12500, () => { flash('uc-src');
+          send('p-sync-src', 'sync', 600, {onArrive: () => { flash('pipe');
+            send('p-snap', 'sync', 2400, {onArrive: () => { flash('os-layers'); badge('b-os', 'Snapshot rows \u2192 layer files', 'purple', 900); }}); }}); }));
+        after(17500, () => { badge('b-pipe', 'Snapshot written \u2192 one transaction', 'purple');
+          send('p-sync', 'sync', 1500, {onArrive: () => { flash('pg1'); badge('b-pg1', 'Snapshot transaction', 'purple', 900); after(500, () => commit()); }}); });
+        after(23500, () => pageRead(2, 'SELECT \u2026 user_profiles_synced'));
+      } },
+    { ph: P3A, lv: 3, sub: 'b', t: 'Synced tables: Triggered', on: ['p-sync-src','p-sync',...WRITE,'p-pr-2'], dur: 30000, src: S.sync,
+      d: 'Triggered mode runs on a schedule or on demand. Each run applies the changes since the last run as one incremental batch, written through the primary, then waits for the next trigger.',
+      run(){
+        after(1400, () => badge('b-pipe', 'Triggered \u00b7 incremental batch', 'purple'));
+        after(2400, () => { flash('uc-src');
+          send('p-sync-src', 'sbatch', 900, {onArrive: () => { flash('pipe', 900);
+            send('p-sync', 'sbatch', 2000, {onArrive: () => { flash('pg1'); badge('b-pg1', 'Apply batch', 'purple', 1200); after(500, () => commit()); }}); }}); });
+        after(10000, () => pageRead(2, 'SELECT \u2026 user_profiles_synced'));
+        after(14000, () => badge('b-pipe', 'Idle until the next trigger', ''));
+      } },
+    { ph: P3A, lv: 3, sub: 'c', t: 'Synced tables: Continuous', on: ['p-sync-src','p-sync',...WRITE,'p-pr-2'], dur: 30000, src: S.sync,
+      d: 'Continuous mode streams changes from the Delta source to the primary in a slow, steady flow, keeping the Postgres table within seconds of the source.',
+      run(){
+        after(1400, () => { badge('b-pipe', 'Continuous \u00b7 streaming changes', 'purple'); every(1500, 27500, syncRows); });
+        after(10000, () => pageRead(2, 'SELECT \u2026 user_profiles_synced')); after(21000, () => pageRead(2, 'SELECT \u2026 user_profiles_synced'));
+      } },
+
+    { ph: P3B, lv: 4, t: 'Lakebase CDF', on: [...WRITE,'p-cdf-1','p-cdf-2'], dur: 10500, src: S.cdf,
+      d: 'Lakebase CDF captures every insert, update and delete from the WAL and appends it to a Unity Catalog managed Delta table, lb_<table>_history, batched about every 15 seconds (time compressed here).',
+      run(){ after(1200, () => { every(1800, 8400, () => commit()); after(1500, () => every(700, 7400, cdfChange)); after(3600, () => every(2600, 5800, cdfFlush)); }); } },
+
+    { ph: P3C, lv: 5, t: 'Managed DR: replication', on: [...WRITE,'p-dr'], dur: 9500, src: S.dr,
+      d: 'Managed DR pairs the project with a secondary workspace in another region. Committed data is replicated periodically at the storage layer, so the secondary compute stays idle and there is no standby compute cost.',
+      run(){ after(1200, () => { badge('b-sec', 'Idle until failover \u00b7 no standby compute', ''); every(2000, 7600, () => commit()); after(800, () => every(2400, 7000, drBurst)); }); } },
+    { ph: P3C, lv: 5, fo: true, t: 'Managed DR: failover', on: ['p-sec-read'], dur: 8500, src: S.dr,
+      d: 'Failover is manual. The secondary is promoted to primary with a new connection string. Synced-table and CDF pipelines terminate and must be reconfigured; synced data is already replicated, CDF Delta tables are not.',
+      run(){ badge('b-sec', 'Promoted to primary \u00b7 new connection string', 'green');
+             after(700, () => badge('b-pipe', 'Terminated \u00b7 reconfigure after failover', ''));
+             after(1200, () => badge('b-cdf', 'Terminated \u00b7 CDF Delta not replicated', ''));
+             after(1600, () => every(1100, 6400, secRead)); } },
+
+    { ph: PALL, lv: 5, t: 'Everything together', on: 'ALL', dur: 12000, src: 'All sources above',
+      d: 'One shared storage layer serves the primary and the replica, the lakehouse in both directions (synced tables in, CDF out) and a secondary region for disaster recovery.',
+      run(){ every(2000, 11000, () => commit()); every(500, 11500, streamWal); every(1200, 11500, flushLayer);
+             after(400, () => every(1200, 11000, flushParquet)); every(1000, 11500, archive);
+             after(1500, () => pageRead(1)); after(3500, () => pageRead(2)); after(8000, () => pageRead(2));
+             after(2500, syncRows); after(7000, syncRows);
+             after(1000, () => every(900, 10000, cdfChange)); after(3000, () => every(3000, 8500, cdfFlush));
+             after(1800, () => every(3200, 9500, drBurst)); } }
+  ];
+
+  // ---------- step list (grouped by phase) ----------
+  const list = $('steps'), items = [];
+  let lastPh = '';
+  // step labels: sub-steps share a number (9a, 9b, 9c)
+  let num = 0;
+  STAGES.forEach(s => { if (!s.sub || s.sub === 'a') num++; s.label = num + (s.sub || ''); });
+  const TOTAL = num;
+  STAGES.forEach((s, i) => {
+    if (s.ph !== lastPh) { const h = document.createElement('li'); h.className = 'ph'; h.textContent = s.ph; list.appendChild(h); lastPh = s.ph; }
+    const li = document.createElement('li'); li.innerHTML = `<b>${s.label}</b><span>${s.t}</span>`; li.onclick = () => go(i); list.appendChild(li); items.push(li);
+  });
+
+  const ALL_FLOWS = [...document.querySelectorAll('.flow')].map(p => p.id).filter(id => id !== 'p-sec-read' && id !== 'p-snap');
+
+  function go(i){
+    stageIdx = (i + STAGES.length) % STAGES.length; const s = STAGES[stageIdx];
+    timers = []; packets.forEach(p => p.el.remove()); packets = []; cdfBuf = 0;
+    document.querySelectorAll('.flash').forEach(n => n.classList.remove('flash'));
+    document.querySelectorAll('.node.sn').forEach(n => n.classList.remove('blue'));
+    document.querySelectorAll('.badge').forEach(b => b.classList.remove('show'));
+    applyLevel(s.lv); setFailover(!!s.fo);
+    const on = s.on === 'ALL' ? ALL_FLOWS : s.on;
+    document.querySelectorAll('.flow').forEach(p => p.classList.toggle('on', on.includes(p.id)));
+    $('stepk').textContent = `${s.ph.toUpperCase()} \u00b7 STEP ${s.label} OF ${TOTAL}`;
+    $('steph').textContent = s.t; $('stepp').textContent = s.d; $('stepsrc').textContent = 'Source: ' + s.src;
+    items.forEach((li, k) => li.classList.toggle('cur', k === stageIdx));
+    // keep the current step visible without scrolling the parent page
+    const li = items[stageIdx];
+    // #steps is position:relative, so li.offsetTop is measured from the top of the list
+    if (li.offsetTop < list.scrollTop || li.offsetTop + li.offsetHeight > list.scrollTop + list.clientHeight)
+      list.scrollTop = Math.max(0, li.offsetTop - 40);
+    stageStart = simT; stageDur = s.dur; s.run();
+    after(s.dur, () => { if (auto) go(stageIdx + 1); else timers = []; });
+  }
+
+  // ---------- controls ----------
+  const setPlay = v => { playing = v; $('play').textContent = v ? '\u275a\u275a Pause' : '\u25b6 Play'; };
+  $('play').onclick = () => setPlay(!playing);
+  $('next').onclick = () => go(stageIdx + 1);
+  $('prev').onclick = () => go(stageIdx - 1);
+  $('speed').onchange = e => speed = parseFloat(e.target.value);
+  $('auto').onclick = () => { auto = !auto; $('auto').textContent = 'Auto: ' + (auto ? 'on' : 'off'); if (auto && !timers.length) go(stageIdx + 1); };
+  addEventListener('keydown', e => {
+    if (e.code === 'Space') { e.preventDefault(); setPlay(!playing); }
+    else if (e.key === 'ArrowRight') go(stageIdx + 1);
+    else if (e.key === 'ArrowLeft') go(stageIdx - 1);
+  });
+
+  go(0); requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
