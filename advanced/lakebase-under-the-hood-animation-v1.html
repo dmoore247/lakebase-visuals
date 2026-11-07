@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Lakebase under the hood - animated data flows</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root{--navy:#1B3139;--lava:#FF3621;--blue:#2272B4;--yellow:#FFAB00;--green:#00A972;--oat:#F9F7F4;--gray:#C3CBD0;--ink:#1B3139;--muted:#5A6F77}
+  html,body{margin:0;height:100%;background:#E9E7E2;font-family:"DM Sans",Inter,"Segoe UI",Helvetica,Arial,sans-serif;overflow:hidden}
+  #stage{position:absolute;left:50%;top:50%;width:1280px;height:720px;transform-origin:center center;background:var(--oat);box-shadow:0 10px 40px rgba(0,0,0,.18);border-radius:6px;overflow:hidden}
+  svg{position:absolute;inset:0;width:1280px;height:720px}
+  .title{font-size:30px;font-weight:700;fill:var(--ink)}
+  .sub{font-size:17px;fill:var(--muted)}
+  .tag{font-size:15px;font-weight:700;fill:#fff;text-anchor:middle}
+  .band{fill:#fff;stroke:#DCE0E2;stroke-width:1.5}
+  .band.s{fill:#F1F3F4}
+  .bandlbl{font-size:12px;font-weight:700;letter-spacing:.14em;fill:var(--muted)}
+  .tier{fill:#fff;stroke:#CBD3D7;stroke-width:1.5}
+  .tierT{font-size:16px;font-weight:700;fill:var(--ink)}
+  .tierD{font-size:11.5px;fill:var(--muted)}
+  .chip{fill:#EEF1F3}
+  .chipT{font-size:10.5px;font-weight:700;fill:var(--muted);letter-spacing:.06em}
+  .node rect{transition:fill .25s,stroke .25s}
+  .pg rect{fill:var(--navy)}
+  .pg .nt{fill:#fff;font-size:20px;font-weight:700;text-anchor:middle}
+  .pg .ns{fill:#B9C6CB;font-size:12.5px;text-anchor:middle}
+  .sn rect{fill:#F7F8F9;stroke:#CBD3D7;stroke-width:1.2}
+  .sn text{font-size:12px;fill:var(--ink);text-anchor:middle}
+  .sn .small{font-size:10px;fill:var(--muted)}
+  .seg rect{fill:#F7F8F9;stroke:#CBD3D7;stroke-dasharray:4 3}
+  .seg text{font-size:12.5px;fill:var(--ink);text-anchor:middle;font-weight:600}
+  .seg .small{font-size:10.5px;fill:var(--muted);font-weight:400}
+  .flash.pg rect{fill:#2C4D59}
+  .flash.sn rect{fill:#FFE9E5;stroke:var(--lava)}
+  .flash.sn.blue rect{fill:#E3EEF8;stroke:var(--blue)}
+  .flash.seg rect{fill:#FFF4DB;stroke:var(--yellow);stroke-dasharray:none}
+  .flash.seg.green rect{fill:#DDF5EC;stroke:var(--green)}
+  .flow{fill:none;stroke:var(--gray);stroke-width:2;marker-end:url(#ah-gray);transition:stroke .3s,stroke-width .3s,opacity .3s;opacity:.75}
+  .flow.ack{stroke-dasharray:5 4}
+  .flow.on{opacity:1;stroke-width:3}
+  .flow.on.wal{stroke:var(--lava);marker-end:url(#ah-wal)}
+  .flow.on.page{stroke:var(--blue);marker-end:url(#ah-page)}
+  .flow.on.layer{stroke:var(--yellow);marker-end:url(#ah-layer)}
+  .flow.on.pq,.flow.on.ack{stroke:var(--green);marker-end:url(#ah-pq)}
+  .lbl{font-size:12.5px;font-weight:700;fill:var(--muted);paint-order:stroke;stroke:#F1F3F4;stroke-width:5px;stroke-linejoin:round}
+  .lbl.w{stroke:#fff}
+  .badge{opacity:0;transition:opacity .3s}
+  .badge.show{opacity:1}
+  .badge rect{fill:var(--navy)}
+  .badge.lava rect{fill:var(--lava)}
+  .badge.green rect{fill:var(--green)}
+  .badge.blue rect{fill:var(--blue)}
+  .badge.yellow rect{fill:#E89A00}
+  .badge text{fill:#fff;font-size:12px;font-weight:700;text-anchor:middle}
+  #callout-line{stroke:var(--green);stroke-width:1.5;stroke-dasharray:3 4;fill:none;opacity:.35;transition:opacity .3s}
+  #callout-line.on{opacity:1}
+  .foot{font-size:11px;fill:#8A9AA0}
+  /* HTML overlays */
+  #panel{position:absolute;left:1010px;top:110px;width:240px;height:378px;background:#fff;border:1.5px solid #DCE0E2;border-radius:14px;padding:16px 16px 12px;box-sizing:border-box;color:var(--ink)}
+  #panel .k{font-size:11px;letter-spacing:.14em;font-weight:700;color:var(--lava)}
+  #panel h3{margin:6px 0 8px;font-size:18px;line-height:1.2}
+  #panel p{margin:0 0 12px;font-size:13px;line-height:1.45;color:#3C5560;min-height:112px}
+  #steps{list-style:none;margin:0;padding:0;border-top:1px solid #EEF1F3;padding-top:8px}
+  #steps li{font-size:12.5px;padding:4px 6px;border-radius:6px;cursor:pointer;color:var(--muted);display:flex;gap:8px}
+  #steps li b{color:var(--gray);width:16px}
+  #steps li.cur{background:#FFF0ED;color:var(--ink);font-weight:700}
+  #steps li.cur b{color:var(--lava)}
+  #callout{position:absolute;left:1010px;top:500px;width:240px;height:150px;background:#fff;border:1.5px solid #DCE0E2;border-left:5px solid var(--green);border-radius:12px;padding:12px 14px;box-sizing:border-box;transition:box-shadow .3s,border-color .3s}
+  #callout.on{box-shadow:0 0 0 4px rgba(0,169,114,.18);border-color:var(--green)}
+  #callout .h{font-weight:700;font-size:14px;color:var(--ink);margin-bottom:6px}
+  #callout .t{font-size:12.5px;line-height:1.45;color:#3C5560}
+  #callout .p{margin-top:8px;font-size:12px;font-weight:700;color:var(--green)}
+  #controls{position:absolute;left:40px;top:676px;display:flex;gap:8px;align-items:center}
+  #controls button,#controls select{font:600 12.5px "DM Sans",Inter,Arial,sans-serif;border:1.5px solid #CBD3D7;background:#fff;color:var(--ink);border-radius:8px;padding:6px 12px;cursor:pointer}
+  #controls button:hover{border-color:var(--navy)}
+  #controls #play{background:var(--navy);color:#fff;border-color:var(--navy);min-width:84px}
+  #legend{display:flex;gap:14px;margin-left:16px;font-size:12px;color:var(--muted)}
+  #legend span::before{content:"";display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px;vertical-align:-1px;background:var(--c)}
+  #bar{position:absolute;left:0;top:0;height:4px;background:var(--lava);width:0}
+</style>
+</head>
+<body>
+<div id="stage">
+<div id="bar"></div>
+<svg id="svg" viewBox="0 0 1280 720" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="ah-gray" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#C3CBD0"/></marker>
+    <marker id="ah-wal" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#FF3621"/></marker>
+    <marker id="ah-page" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#2272B4"/></marker>
+    <marker id="ah-layer" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#FFAB00"/></marker>
+    <marker id="ah-pq" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#00A972"/></marker>
+  </defs>
+
+  <!-- Header -->
+  <rect x="40" y="34" width="44" height="28" rx="6" fill="#FF3621"/><text x="62" y="53" class="tag">08</text>
+  <text x="100" y="58" class="title">Lakebase under the hood</text>
+  <text x="100" y="86" class="sub">Stateless Postgres on shared, multi-tenant storage</text>
+
+  <!-- Compute band -->
+  <rect x="40" y="110" width="950" height="160" rx="14" class="band"/>
+  <text x="60" y="134" class="bandlbl">COMPUTE · BARE METAL HOSTS</text>
+  <g id="pg1" class="node pg"><rect x="120" y="148" width="300" height="98" rx="12"/><text x="270" y="193" class="nt">PostgreSQL</text><text x="270" y="217" class="ns">Stateless micro-VM · primary (R/W)</text></g>
+  <g id="pg2" class="node pg"><rect x="580" y="148" width="300" height="98" rx="12"/><text x="730" y="193" class="nt">PostgreSQL</text><text x="730" y="217" class="ns">Stateless micro-VM · replica (R/O)</text></g>
+
+  <!-- Storage band -->
+  <rect x="40" y="330" width="950" height="335" rx="14" class="band s"/>
+  <text x="60" y="354" class="bandlbl">MULTI-TENANT STORAGE</text>
+
+  <!-- Pageservers -->
+  <rect x="90" y="372" width="370" height="150" rx="12" class="tier"/>
+  <text x="108" y="396" class="tierT">Pageservers ×2</text>
+  <rect x="388" y="382" width="60" height="20" rx="5" class="chip"/><text x="418" y="396" class="chipT" text-anchor="middle">NVMe SSD</text>
+  <text x="108" y="413" class="tierD">Reconstruct any page from its WAL deltas</text>
+  <text x="108" y="426" class="tierD">(write-through cache)</text>
+  <g id="ps1" class="node sn"><rect x="110" y="436" width="160" height="54" rx="9"/><text x="190" y="459">pageserver-1</text><text x="190" y="475" class="small">image + delta layers</text></g>
+  <g id="ps2" class="node sn"><rect x="285" y="436" width="160" height="54" rx="9"/><text x="365" y="459">pageserver-2</text><text x="365" y="475" class="small">image + delta layers</text></g>
+
+  <!-- Safekeepers -->
+  <rect x="560" y="372" width="390" height="150" rx="12" class="tier"/>
+  <text x="578" y="396" class="tierT">Safekeepers ×3</text>
+  <rect x="878" y="382" width="60" height="20" rx="5" class="chip"/><text x="908" y="396" class="chipT" text-anchor="middle">NVMe SSD</text>
+  <text x="578" y="413" class="tierD">Accept WAL into a durable quorum</text>
+  <text x="578" y="426" class="tierD">(one per availability zone)</text>
+  <g id="sk1" class="node sn"><rect x="575" y="436" width="112" height="54" rx="9"/><text x="631" y="459">safekeeper-1</text><text x="631" y="475" class="small">AZ-a</text></g>
+  <g id="sk2" class="node sn"><rect x="699" y="436" width="112" height="54" rx="9"/><text x="755" y="459">safekeeper-2</text><text x="755" y="475" class="small">AZ-b</text></g>
+  <g id="sk3" class="node sn"><rect x="823" y="436" width="112" height="54" rx="9"/><text x="879" y="459">safekeeper-3</text><text x="879" y="475" class="small">AZ-c</text></g>
+
+  <!-- Object storage -->
+  <rect x="90" y="542" width="860" height="108" rx="12" class="tier"/>
+  <text x="108" y="566" class="tierT">Object storage</text>
+  <text x="236" y="566" class="tierD">Durable, zone-redundant · S3 (AWS) · Blob (Azure) · GCS (GCP)</text>
+  <g id="os-layers" class="node seg"><rect x="105" y="580" width="270" height="58" rx="8"/><text x="240" y="604">Layer files</text><text x="240" y="621" class="small">page images + WAL deltas</text></g>
+  <g id="os-parquet" class="node seg green"><rect x="390" y="580" width="270" height="58" rx="8"/><text x="525" y="604">Parquet (columnar copy)</text><text x="525" y="621" class="small">row versions preserved · LTAP reads</text></g>
+  <g id="os-wal" class="node seg"><rect x="675" y="580" width="260" height="58" rx="8"/><text x="805" y="604">WAL archive</text><text x="805" y="621" class="small">history for PITR &amp; branching</text></g>
+
+  <!-- Flow paths -->
+  <path id="p-pr-1"   class="flow page"  d="M 190 436 L 190 248"/>
+  <path id="p-pr-2"   class="flow page"  d="M 380 436 C 380 330, 640 330, 640 248"/>
+  <path id="p-wal-1"  class="flow wal"   d="M 330 246 C 330 330, 631 330, 631 434"/>
+  <path id="p-wal-2"  class="flow wal"   d="M 345 246 C 345 320, 755 320, 755 434"/>
+  <path id="p-wal-3"  class="flow wal"   d="M 360 246 C 360 310, 879 310, 879 434"/>
+  <path id="p-ack"    class="flow ack"   d="M 605 436 C 605 360, 405 360, 405 248"/>
+  <path id="p-sk-ps"  class="flow wal"   d="M 575 463 L 447 463"/>
+  <path id="p-layers" class="flow layer" d="M 190 490 L 190 578"/>
+  <path id="p-parquet" class="flow pq"   d="M 365 490 C 365 540, 525 530, 525 578"/>
+  <path id="p-archive" class="flow wal"  d="M 790 490 L 790 578"/>
+
+  <!-- Flow labels -->
+  <text x="180" y="318" class="lbl w" text-anchor="end">↑ Page reads</text>
+  <text x="448" y="352" class="lbl">commit ack</text>
+  <text x="650" y="276" class="lbl w">↑ Page reads (replica)</text>
+  <text x="511" y="455" class="lbl w" text-anchor="middle">← WAL</text>
+  <text x="200" y="536" class="lbl w">↓ Layers</text>
+  <text x="452" y="536" class="lbl w" text-anchor="end">↓ Parquet</text>
+  <text x="800" y="536" class="lbl w">↓ WAL archive</text>
+
+  <!-- Badges -->
+  <g id="b-pg1" class="badge"><rect x="180" y="136" width="180" height="24" rx="12"/><text x="270" y="152"></text></g>
+  <g id="b-pg2" class="badge"><rect x="630" y="136" width="200" height="24" rx="12"/><text x="730" y="152"></text></g>
+  <g id="b-ps"  class="badge"><rect x="135" y="360" width="280" height="24" rx="12"/><text x="275" y="376"></text></g>
+  <g id="b-sk"  class="badge"><rect x="655" y="360" width="200" height="24" rx="12"/><text x="755" y="376"></text></g>
+  <g id="b-os"  class="badge"><rect x="400" y="530" width="250" height="24" rx="12"/><text x="525" y="546"></text></g>
+
+  <g id="packets"></g>
+
+  <text x="1250" y="700" class="foot" text-anchor="end">© 2026 Databricks Inc. — All rights reserved   ·   16</text>
+</svg>
+
+<div id="panel">
+  <div class="k" id="stepk">STEP 1 OF 6</div>
+  <h3 id="steph"></h3>
+  <p id="stepp"></p>
+  <ul id="steps"></ul>
+</div>
+
+<div id="controls">
+  <button id="prev" title="Previous step (←)">◀ Prev</button>
+  <button id="play" title="Play / pause (space)">❚❚ Pause</button>
+  <button id="next" title="Next step (→)">Next ▶</button>
+  <select id="speed" title="Speed"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="1.5">1.5×</option><option value="2">2×</option></select>
+  <button id="auto" title="Auto-advance steps">Auto: on</button>
+  <div id="legend"><span style="--c:#FF3621">WAL</span><span style="--c:#2272B4">Pages</span><span style="--c:#FFAB00">Layers</span><span style="--c:#00A972">Parquet / ack</span></div>
+</div>
+</div>
+
+<script>
+(function(){
+  const NS = 'http://www.w3.org/2000/svg';
+  const $ = id => document.getElementById(id);
+  const layer = $('packets');
+
+  // ---------- fit to window ----------
+  function fit(){ const s = Math.min(innerWidth/1300, innerHeight/740); $('stage').style.transform = `translate(-50%,-50%) scale(${s})`; }
+  addEventListener('resize', fit); fit();
+
+  // ---------- simulation clock (pausable) ----------
+  let simT = 0, last = performance.now(), playing = true, speed = 1, auto = true;
+  let timers = [], packets = [], stageIdx = 0, stageStart = 0, stageDur = 1;
+  const after = (ms, fn) => timers.push({at: simT + ms, fn});
+  const every = (ms, total, fn) => { for (let t = 0; t < total; t += ms) after(t, fn); };
+  const ease = t => t < .5 ? 2*t*t : 1 - Math.pow(-2*t + 2, 2)/2;
+
+  const COLORS = {wal:'#FF3621', page:'#2272B4', layer:'#FFAB00', pq:'#00A972', ack:'#00A972', req:'#2272B4'};
+  function makeShape(kind){
+    const g = document.createElementNS(NS, 'g');
+    const c = COLORS[kind];
+    if (kind === 'wal' || kind === 'ack') {
+      const e = document.createElementNS(NS, 'circle');
+      e.setAttribute('r', kind === 'ack' ? 6 : 7); e.setAttribute('fill', c);
+      e.setAttribute('stroke', '#fff'); e.setAttribute('stroke-width', 2); g.appendChild(e);
+    } else if (kind === 'req') {
+      const e = document.createElementNS(NS, 'circle');
+      e.setAttribute('r', 6); e.setAttribute('fill', '#fff'); e.setAttribute('stroke', c); e.setAttribute('stroke-width', 2.5); g.appendChild(e);
+    } else if (kind === 'pq') {
+      for (let i = 0; i < 3; i++) { const r = document.createElementNS(NS, 'rect');
+        r.setAttribute('x', -8 + i*5.5); r.setAttribute('y', -8); r.setAttribute('width', 4.5); r.setAttribute('height', 16); r.setAttribute('rx', 1);
+        r.setAttribute('fill', c); g.appendChild(r); }
+    } else {
+      const r = document.createElementNS(NS, 'rect');
+      r.setAttribute('x', -9); r.setAttribute('y', -7); r.setAttribute('width', 18); r.setAttribute('height', 14); r.setAttribute('rx', 2.5);
+      r.setAttribute('fill', c); r.setAttribute('stroke', '#fff'); r.setAttribute('stroke-width', 1.5); g.appendChild(r);
+    }
+    return g;
+  }
+  function send(pathId, kind, dur, opts = {}){
+    const path = $(pathId); const el = makeShape(kind); layer.appendChild(el);
+    const p = {path, el, len: path.getTotalLength(), start: simT, dur, rev: !!opts.reverse, onArrive: opts.onArrive};
+    place(p, 0); packets.push(p);
+  }
+  function place(p, t){ const L = p.len * (p.rev ? 1 - ease(t) : ease(t)); const pt = p.path.getPointAtLength(L); p.el.setAttribute('transform', `translate(${pt.x},${pt.y})`); }
+
+  function flash(id, ms = 500){ const n = $(id); n.classList.add('flash'); after(ms, () => n.classList.remove('flash')); }
+  function badge(id, text, cls = '', ms = 0){ const b = $(id); b.querySelector('text').textContent = text; b.setAttribute('class', 'badge show ' + cls); if (ms) after(ms, () => b.classList.remove('show')); }
+
+  function tick(){
+    timers.sort((a, b) => a.at - b.at);
+    while (timers.length && timers[0].at <= simT) timers.shift().fn();
+    for (const p of packets) {
+      const t = (simT - p.start) / p.dur;
+      if (t >= 1) { p.el.remove(); p.done = true; if (p.onArrive) p.onArrive(); continue; }
+      place(p, t);
+    }
+    packets = packets.filter(p => !p.done);
+    $('bar').style.width = Math.min(100, (simT - stageStart) / stageDur * 100) + '%';
+  }
+  function frame(now){ const dt = Math.min(now - last, 50); last = now; if (playing) { simT += dt * speed; tick(); } requestAnimationFrame(frame); }
+
+  // ---------- flow helpers ----------
+  function commit(withAck = true){
+    badge('b-pg1', 'INSERT … ; COMMIT', '', 1600);
+    let acks = 0;
+    [1100, 1350, 2100].forEach((d, i) => after(i * 60, () => send('p-wal-' + (i + 1), 'wal', d, {onArrive: () => {
+      flash('sk' + (i + 1)); acks++;
+      if (acks === 2 && withAck) {
+        badge('b-sk', 'Quorum 2 of 3 ✓', 'green', 1400);
+        send('p-ack', 'ack', 950, {onArrive: () => { flash('pg1'); badge('b-pg1', 'COMMIT acknowledged ✓', 'green', 1200); }});
+      }
+    }})));
+  }
+  const streamWal = () => send('p-sk-ps', 'wal', 700, {onArrive: () => flash(Math.random() < .5 ? 'ps1' : 'ps2')});
+  const flushLayer = () => send('p-layers', 'layer', 800, {onArrive: () => flash('os-layers')});
+  const flushParquet = () => send('p-parquet', 'pq', 1000, {onArrive: () => flash('os-parquet')});
+  const archive = () => send('p-archive', 'wal', 800, {onArrive: () => flash('os-wal')});
+  function pageRead(which){
+    const pg = which === 1 ? 'pg1' : 'pg2', path = which === 1 ? 'p-pr-1' : 'p-pr-2', ps = which === 1 ? 'ps1' : 'ps2', b = which === 1 ? 'b-pg1' : 'b-pg2';
+    // No packet travels against the arrow: show the miss, the pageserver rebuilding the page, then the page flowing up
+    badge(b, 'SELECT … buffer-cache miss', 'blue', 1300);
+    after(700, () => {
+      $(ps).classList.add('blue'); flash(ps, 900); after(900, () => $(ps).classList.remove('blue'));
+      badge('b-ps', 'GetPage@LSN → image + WAL deltas', 'blue', 1300);
+      after(650, () => send(path, 'page', 950, {onArrive: () => { flash(pg); badge(b, 'Page returned → rows sent', 'blue', 1200); }}));
+    });
+  }
+
+  // ---------- stages ----------
+  const STAGES = [
+    { t: 'Write path: commit', on: ['p-wal-1','p-wal-2','p-wal-3','p-ack'], dur: 5200,
+      d: 'The primary streams WAL records to three safekeepers, one per availability zone. A transaction commits as soon as 2 of 3 have durably persisted it.',
+      run(){ commit(); after(2700, () => commit()); } },
+    { t: 'WAL to pageservers', on: ['p-sk-ps'], dur: 5000,
+      d: 'Safekeepers stream WAL to the pageservers, which apply it asynchronously, off the commit path. Pageservers act as a write-through cache above object storage.',
+      run(){ badge('b-ps', 'Ingest WAL → in-memory layer', 'lava'); every(380, 4200, streamWal); } },
+    { t: 'Flush to object storage', on: ['p-layers','p-parquet'], co: true, dur: 5600,
+      d: 'Pageservers flush layer files (page images plus WAL deltas) to object storage. The same flush also writes a columnar copy: rows transcoded to Parquet.',
+      run(){ badge('b-ps', 'Flush layers', 'yellow'); every(650, 4800, flushLayer); after(250, () => every(650, 4600, flushParquet));
+             after(900, () => badge('b-os', 'Parquet copy: row versions preserved', 'green')); } },
+    { t: 'WAL archive', on: ['p-archive'], dur: 4000,
+      d: 'Safekeepers archive WAL segments to durable, zone-redundant object storage. This history backs point-in-time restore and copy-on-write branches.',
+      run(){ badge('b-sk', 'Archive WAL segments', 'lava'); every(420, 3400, archive); } },
+    { t: 'Read path: page fetch', on: ['p-pr-1','p-pr-2'], dur: 6200,
+      d: 'Primary and read replica both read pages from the same pageservers, so a replica duplicates no data. On a cache miss, Postgres requests a page at an LSN; the pageserver rebuilds and returns it.',
+      run(){ pageRead(2); after(3000, () => pageRead(1)); } },
+    { t: 'Steady state', on: ['p-wal-1','p-wal-2','p-wal-3','p-ack','p-sk-ps','p-layers','p-parquet','p-archive','p-pr-1','p-pr-2'], co: true, dur: 9000,
+      d: 'All flows at once: stateless compute on top of durable, shared, multi-tenant storage. Compute and storage scale and recover independently.',
+      run(){ every(1800, 8000, () => commit()); every(450, 8600, streamWal);
+             every(1100, 8600, flushLayer); after(400, () => every(1100, 8200, flushParquet)); every(900, 8600, archive);
+             after(1200, () => pageRead(2)); after(4600, () => pageRead(1)); after(6800, () => pageRead(2)); } }
+  ];
+
+  const list = $('steps');
+  STAGES.forEach((s, i) => { const li = document.createElement('li'); li.innerHTML = `<b>${i + 1}</b><span>${s.t}</span>`; li.onclick = () => go(i); list.appendChild(li); });
+
+  function go(i){
+    stageIdx = (i + STAGES.length) % STAGES.length; const s = STAGES[stageIdx];
+    timers = []; packets.forEach(p => p.el.remove()); packets = [];
+    document.querySelectorAll('.flash').forEach(n => n.classList.remove('flash'));
+    document.querySelectorAll('.node.sn').forEach(n => n.classList.remove('blue'));
+    document.querySelectorAll('.badge').forEach(b => b.classList.remove('show'));
+    document.querySelectorAll('.flow').forEach(p => p.classList.toggle('on', s.on.includes(p.id)));
+    $('stepk').textContent = `STEP ${stageIdx + 1} OF ${STAGES.length}`; $('steph').textContent = s.t; $('stepp').textContent = s.d;
+    [...list.children].forEach((li, k) => li.classList.toggle('cur', k === stageIdx));
+    stageStart = simT; stageDur = s.dur; s.run();
+    after(s.dur, () => { if (auto) go(stageIdx + 1); else timers = []; });
+  }
+
+  // ---------- controls ----------
+  const setPlay = v => { playing = v; $('play').textContent = v ? '❚❚ Pause' : '▶ Play'; };
+  $('play').onclick = () => setPlay(!playing);
+  $('next').onclick = () => go(stageIdx + 1);
+  $('prev').onclick = () => go(stageIdx - 1);
+  $('speed').onchange = e => speed = parseFloat(e.target.value);
+  $('auto').onclick = () => { auto = !auto; $('auto').textContent = 'Auto: ' + (auto ? 'on' : 'off'); if (auto && !timers.length) go(stageIdx + 1); };
+  addEventListener('keydown', e => {
+    if (e.code === 'Space') { e.preventDefault(); setPlay(!playing); }
+    else if (e.key === 'ArrowRight') go(stageIdx + 1);
+    else if (e.key === 'ArrowLeft') go(stageIdx - 1);
+  });
+
+  go(0); requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
