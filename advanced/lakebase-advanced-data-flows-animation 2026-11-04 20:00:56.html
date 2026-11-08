@@ -146,6 +146,9 @@
   /* the snapshot route is only drawn while snapshot mode is playing */
   #p-snap:not(.on), #p-snap:not(.on) + text{opacity:0}
   #p-snap + text{transition:opacity var(--dur-state) var(--ease-quart)}
+  /* routes hidden for part of a stage (snapshot: top arrow only appears for the final transaction) */
+  .gone{opacity:0!important}
+  #t-sync{transition:opacity var(--dur-state) var(--ease-quart)}
   /* HTML overlays */
   #panel{position:absolute;left:1010px;top:110px;width:240px;height:700px;background:var(--surface);border:1.5px solid var(--line-soft);border-radius:14px;padding:14px 14px 10px;box-sizing:border-box;color:var(--ink);display:flex;flex-direction:column}
   #panel .k{font-size:10.5px;letter-spacing:.12em;font-weight:700;color:var(--muted)}
@@ -336,32 +339,32 @@
 
   <!-- ===================== PHASE 3a: Lakehouse / Unity Catalog + Synced tables ===================== -->
   <g id="lh-sync" class="reveal" data-level="3">
-    <rect x="668" y="124" width="322" height="512" rx="14" class="band"/>
-    <text x="686" y="144" class="bandlbl">LAKEHOUSE · UNITY CATALOG</text>
-    <g id="pipe" class="node sn purple"><rect x="688" y="152" width="282" height="46" rx="9"/><text x="829" y="171" class="bt">Synced table pipeline</text><text x="829" y="188" class="small">managed Lakeflow · snapshot / triggered / continuous</text></g>
-    <g id="uc-src" class="node sn purple"><rect x="688" y="222" width="282" height="46" rx="9"/><text x="829" y="241" class="bt">analytics.gold.user_profiles</text><text x="829" y="258" class="small">UC source · Delta, Iceberg or view</text></g>
-    <path id="p-sync-src" class="flow sync" d="M 829 222 L 829 200"/>
-    <path id="p-sync" class="flow sync" d="M 688 175 L 654 175 L 654 266 L 214 266 Q 200 266 200 280 L 200 293"/>
-    <text x="838" y="214" class="lbl w">↑ sync</text>
-    <text id="t-sync" x="330" y="284" class="lbl w" text-anchor="middle">← synced rows into Postgres</text>
+    <rect x="683" y="270" width="307" height="366" rx="14" class="band"/>
+    <text x="701" y="291" class="bandlbl">LAKEHOUSE · UNITY CATALOG</text>
+    <g id="pipe" class="node sn purple"><rect x="700" y="300" width="273" height="44" rx="9"/><text x="836.5" y="318" class="bt">Synced table pipeline</text><text x="836.5" y="334" class="small">managed Lakeflow · snapshot / triggered / continuous</text></g>
+    <g id="uc-src" class="node sn purple"><rect x="700" y="366" width="273" height="44" rx="9"/><text x="836.5" y="384" class="bt">analytics.gold.user_profiles</text><text x="836.5" y="400" class="small">UC source · Delta, Iceberg or view</text></g>
+    <path id="p-sync-src" class="flow sync" d="M 836.5 366 L 836.5 346"/>
+    <path id="p-sync" class="flow sync" d="M 700 314 L 673 314 L 673 275 L 244 275 Q 230 275 230 285 L 230 293"/>
+    <text x="845" y="360" class="lbl w">↑ sync</text>
+    <text id="t-sync" x="398" y="290" class="lbl w" text-anchor="middle">← synced rows into Postgres</text>
     <!-- Snapshot mode: bulk write straight into the layer files (routed below the core), then one transaction via the primary -->
-    <path id="p-snap" class="flow sync" d="M 688 188 L 678 188 L 678 644 L 172 644 L 172 621"/>
+    <path id="p-snap" class="flow sync" d="M 700 330 L 677 330 L 677 644 L 172 644 L 172 621"/>
     <text x="420" y="658" class="lbl o" text-anchor="middle">↑ snapshot: bulk write to layer files</text>
   </g>
 
   <!-- ===================== PHASE 3b: Lakebase CDF ===================== -->
   <g id="lh-cdf" class="reveal" data-level="4">
-    <g id="cdf" class="node sn teal"><rect x="688" y="456" width="282" height="46" rx="9"/><text x="829" y="475" class="bt">Lakebase CDF</text><text x="829" y="492" class="small">changes captured from the WAL · batched ~15 s</text></g>
-    <g id="hist" class="node sn teal"><rect x="688" y="552" width="282" height="66" rx="9"/><text x="829" y="573" class="bt">lb_orders_history</text><text x="829" y="590" class="small">UC managed Delta table</text><text x="829" y="606" class="small">_pg_change_type · _pg_lsn · _pg_xid · _timestamp</text></g>
-    <path id="p-cdf-1" class="flow cdf" d="M 642 482 L 686 482"/>
-    <path id="p-cdf-2" class="flow cdf" d="M 829 502 L 829 550"/>
-    <text x="664" y="474" class="lbl w" text-anchor="middle">WAL</text>
-    <text x="838" y="531" class="lbl w">↓ append</text>
+    <g id="cdf" class="node sn teal"><rect x="700" y="456" width="273" height="46" rx="9"/><text x="836.5" y="475" class="bt">Lakebase CDF</text><text x="836.5" y="492" class="small">changes captured from the WAL · batched ~15 s</text></g>
+    <g id="hist" class="node sn teal"><rect x="700" y="552" width="273" height="66" rx="9"/><text x="836.5" y="573" class="bt">lb_orders_history</text><text x="836.5" y="590" class="small">UC managed Delta table</text><text x="836.5" y="606" class="small">_pg_change_type · _pg_lsn · _pg_xid · _timestamp</text></g>
+    <path id="p-cdf-1" class="flow cdf" d="M 642 482 L 698 482"/>
+    <path id="p-cdf-2" class="flow cdf" d="M 836.5 502 L 836.5 550"/>
+    <text x="672" y="474" class="lbl o" text-anchor="middle">WAL</text>
+    <text x="845" y="531" class="lbl w">↓ append</text>
   </g>
 
   <!-- ===================== PHASE 3c: Managed DR ===================== -->
   <g id="dr" class="reveal" data-level="5">
-    <rect x="40" y="654" width="668" height="171" rx="14" class="band s"/>
+    <rect x="40" y="654" width="627" height="171" rx="14" class="band s"/>
     <text x="60" y="676" class="bandlbl">SECONDARY REGION · LAKEBASE MANAGED DR</text>
     <g id="sec-pg" class="node pg idle"><rect x="70" y="692" width="270" height="80" rx="12"/><text x="205" y="726" class="nt">PostgreSQL</text><text x="205" y="750" class="ns" id="sec-pg-sub">secondary · idle until failover</text></g>
     <g id="sec-data" class="node seg indigo"><rect x="377" y="750" width="272" height="56" rx="8"/><text x="550" y="764">Lakebase data (replica copy)</text><text x="550" y="781" class="small">behind primary by the replication lag</text></g>
@@ -373,22 +376,22 @@
 
   <!-- ===================== PHASE 3d: Lakehouse//RT (Reyden) ===================== -->
   <g id="lh-rt" class="reveal" data-level="6">
-    <rect x="724" y="654" width="266" height="171" rx="14" class="band"/>
-    <text x="742" y="672" class="bandlbl">LAKEHOUSE//RT</text>
-    <g id="rt" class="node sn rt"><rect x="738" y="690" width="238" height="52" rx="9"/><text x="857" y="711" class="bt">Lakehouse//RT</text><text x="857" y="728" class="small">Reyden engine · read-only OLAP · high QPS</text></g>
-    <g id="rt-dash" class="node sn rt"><rect x="738" y="766" width="238" height="46" rx="9"/><text x="857" y="785" class="bt">Live dashboards &amp; apps</text><text x="857" y="801" class="small">sub-second aggregates</text></g>
-    <path id="p-rt-1" class="flow rt" d="M 360 620 L 360 647 L 900 647 L 900 688"/>
-    <path id="p-rt-2" class="flow rt" d="M 857 742 L 857 764"/>
+    <rect x="683" y="654" width="307" height="171" rx="14" class="band"/>
+    <text x="701" y="676" class="bandlbl">LAKEHOUSE//RT</text>
+    <g id="rt" class="node sn rt"><rect x="700" y="690" width="273" height="52" rx="9"/><text x="836.5" y="711" class="bt">Lakehouse//RT</text><text x="836.5" y="728" class="small">Reyden engine · read-only OLAP · high QPS</text></g>
+    <g id="rt-dash" class="node sn rt"><rect x="700" y="766" width="273" height="46" rx="9"/><text x="836.5" y="785" class="bt">Live dashboards &amp; apps</text><text x="836.5" y="801" class="small">sub-second aggregates</text></g>
+    <path id="p-rt-1" class="flow rt" d="M 360 620 L 360 647 L 836.5 647 L 836.5 688"/>
+    <path id="p-rt-2" class="flow rt" d="M 836.5 742 L 836.5 764"/>
     <text x="500" y="651" class="lbl o" text-anchor="middle">Parquet scans → Lakehouse//RT (no copy)</text>
   </g>
 
   <!-- Global badges (kept outside the dimmable groups) -->
-  <g id="b-pipe" class="badge"><rect x="689" y="278" width="280" height="24" rx="12"/><text x="829" y="294"></text></g>
-  <g id="b-cdf"  class="badge"><rect x="689" y="444" width="280" height="24" rx="12"/><text x="829" y="460"></text></g>
-  <g id="b-hist" class="badge"><rect x="689" y="540" width="280" height="24" rx="12"/><text x="829" y="556"></text></g>
+  <g id="b-pipe" class="badge"><rect x="696.5" y="416" width="280" height="24" rx="12"/><text x="836.5" y="432"></text></g>
+  <g id="b-cdf"  class="badge"><rect x="696.5" y="444" width="280" height="24" rx="12"/><text x="836.5" y="460"></text></g>
+  <g id="b-hist" class="badge"><rect x="696.5" y="540" width="280" height="24" rx="12"/><text x="836.5" y="556"></text></g>
   <g id="b-sec"  class="badge"><rect x="55" y="680" width="300" height="24" rx="12"/><text x="205" y="696"></text></g>
-  <g id="b-rt"   class="badge"><rect x="742" y="678" width="230" height="24" rx="12"/><text x="857" y="694"></text></g>
-  <g id="b-dr"   class="badge"><rect x="415" y="784" width="270" height="24" rx="12"/><text x="550" y="800"></text></g>
+  <g id="b-rt"   class="badge"><rect x="721.5" y="678" width="230" height="24" rx="12"/><text x="836.5" y="694"></text></g>
+  <g id="b-dr"   class="badge"><rect x="378" y="784" width="270" height="24" rx="12"/><text x="513" y="800"></text></g>
 
   <g id="packets"></g>
 
@@ -627,15 +630,17 @@
       run(){ every(2200, 8000, () => commit()); every(500, 8600, streamWal);
              after(600, () => pageRead(2)); after(2000, () => pageRead(1)); after(3600, () => pageRead(2)); after(5200, () => pageRead(1)); after(6600, () => pageRead(2)); } },
 
-    { ph: P3A, lv: 3, sub: 'a', t: 'Synced tables: Snapshot', on: ['p-sync-src','p-snap','p-sync',...WRITE,'p-pr-2'], dur: 30000,
+    { ph: P3A, lv: 3, sub: 'a', t: 'Synced tables: Snapshot', on: ['p-sync-src','p-snap',...WRITE,'p-pr-2'], dur: 30000,
       src: 'Your description (bulk write to layer files, then one transaction via the primary); sync modes: ' + S.sync,
       d: 'Snapshot mode copies the full Unity Catalog table. The pipeline writes the rows directly into layer files in storage, bypassing Postgres, then fires one transaction through the primary.',
       run(){
+        $('p-sync').classList.add('gone'); $('t-sync').classList.add('gone');
         after(1400, () => badge('b-pipe', 'Snapshot \u00b7 full copy of the source', 'purple'));
         after(1600, () => every(500, 12500, () => { flash('uc-src');
           send('p-sync-src', 'sync', 600, {onArrive: () => { flash('pipe');
             send('p-snap', 'sync', 2400, {onArrive: () => { flash('os-layers'); badge('b-os', 'Snapshot rows \u2192 layer files', 'purple', 900); }}); }}); }));
         after(17500, () => { badge('b-pipe', 'Snapshot written \u2192 one transaction', 'purple');
+          $('p-snap').classList.remove('on'); ['p-sync','t-sync'].forEach(id => $(id).classList.remove('gone')); $('p-sync').classList.add('on');
           send('p-sync', 'sync', 1500, {onArrive: () => { flash('pg1'); badge('b-pg1', 'Snapshot transaction', 'purple', 900); after(500, () => commit()); }}); });
         after(23500, () => pageRead(2, 'SELECT \u2026 user_profiles_synced'));
       } },
@@ -705,6 +710,7 @@
     document.querySelectorAll('.flash').forEach(n => n.classList.remove('flash'));
     document.querySelectorAll('.node.sn').forEach(n => n.classList.remove('blue'));
     document.querySelectorAll('.badge').forEach(b => b.classList.remove('show'));
+    document.querySelectorAll('.gone').forEach(n => n.classList.remove('gone'));
     applyLevel(s.lv); setFailover(!!s.fo);
     const on = s.on === 'ALL' ? ALL_FLOWS : s.on;
     document.querySelectorAll('.flow').forEach(p => p.classList.toggle('on', on.includes(p.id)));
