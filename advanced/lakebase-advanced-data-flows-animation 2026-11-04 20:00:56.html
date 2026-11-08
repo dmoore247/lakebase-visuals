@@ -4,46 +4,79 @@
 <meta charset="utf-8">
 <title>Lakebase data flows - from clients and one compute to synced tables, CDF and managed DR</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script>
+  // resolve theme before first paint: saved choice, else OS preference
+  (function(){ let t; try { t = localStorage.getItem('lb-theme'); } catch (e) {}
+    document.documentElement.dataset.theme = t || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'); })();
+</script>
 <style>
-  :root{--navy:#1B3139;--lava:#FF3621;--blue:#2272B4;--yellow:#FFAB00;--green:#00A972;--purple:#7A4FD6;--teal:#0B8F8F;--indigo:#4F5FD8;--rt:#D9480F;--rt:#D9480F;--oat:#F9F7F4;--gray:#C3CBD0;--ink:#1B3139;--muted:#5A6F77}
-  html,body{margin:0;height:100%;background:#E9E7E2;font-family:"DM Sans",Inter,"Segoe UI",Helvetica,Arial,sans-serif;overflow:hidden}
-  #stage{position:absolute;left:50%;top:50%;width:1280px;height:880px;transform-origin:center center;background:var(--oat);box-shadow:0 10px 40px rgba(0,0,0,.18);border-radius:6px;overflow:hidden}
+  :root{
+    /* brand */
+    --lava:#FF3621;--navy:#0B2026;
+    --font:"DM Sans",ui-sans-serif,system-ui,-apple-system,sans-serif;
+    --font-mono:"DM Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+    /* motion tokens (brand-tokens.css) */
+    --dur-instant:100ms;--dur-state:250ms;--dur-layout:400ms;--dur-entrance:600ms;
+    --ease-quart:cubic-bezier(.25,1,.5,1);--ease-quint:cubic-bezier(.22,1,.36,1);
+    /* flow categories (legend-coded) */
+    --blue:#2272B4;--yellow:#FFAB00;--green:#00A972;--purple:#7A4FD6;--teal:#0B8F8F;--indigo:#4F5FD8;--rt:#D9480F;
+    /* light theme surfaces */
+    --page:#EEEDE9;--stage:#F9F7F4;--surface:#FFFFFF;--surface-2:#EEEDE9;--node:#F9F7F4;--chip:#EEEDE9;
+    --ink:#0B2026;--muted:#4A5568;--faint:#6B7280;--line:#C4CCD6;--line-soft:#DDE1E6;
+    --flow-idle:#C4CCD6;--q:#0B2026;--badge:#0B2026;
+    --pg:#0B2026;--pg-flash:#1B5162;--pg-idle:#A0AEC0;--pg-sub:#CBD5E0;
+    /* control plane */
+    --cp-bg:#0B2026;--cp-line:#1B5162;--cp-chip:#143D4A;--cp-chip-line:#618794;
+    --cp-text:#F9F7F4;--cp-muted:#A0AEC0;--cp-rw:#00A972;--cp-ro:#A0C4D9;--cp-api:#FF9482;
+    --stage-shadow:0 10px 40px rgba(11,32,38,.18);
+    color-scheme:light;
+  }
+  :root[data-theme="dark"]{
+    --page:#071A1F;--stage:#0B2026;--surface:#143D4A;--surface-2:#10313B;--node:#0B2026;--chip:#0B2026;
+    --ink:#FFFFFF;--muted:#CBD5E0;--faint:#A0AEC0;--line:#4A5568;--line-soft:#1B5162;
+    --flow-idle:#4A5568;--q:#F9F7F4;--badge:#1B5162;
+    --pg:#003159;--pg-flash:#1B5162;--pg-idle:#4A5568;--pg-sub:#A0C4D9;
+    --cp-bg:#143D4A;--cp-line:#1B5162;--cp-chip:#0B2026;--cp-chip-line:#4A5568;
+    --stage-shadow:0 0 0 1px #1B5162;
+    color-scheme:dark;
+  }
+  html,body{margin:0;height:100%;background:var(--page);font-family:var(--font);overflow:hidden}
+  #stage{position:absolute;left:50%;top:50%;width:1280px;height:880px;transform-origin:center center;background:var(--stage);box-shadow:var(--stage-shadow);border-radius:6px;overflow:hidden}
   svg{position:absolute;inset:0;width:1280px;height:880px}
+  svg text{font-family:var(--font)}
   .title{font-size:30px;font-weight:700;fill:var(--ink)}
   .sub{font-size:17px;fill:var(--muted)}
-  .tag{font-size:15px;font-weight:700;fill:#fff;text-anchor:middle}
-  .band{fill:#fff;stroke:#DCE0E2;stroke-width:1.5}
-  .band.s{fill:#F1F3F4}
+  .band{fill:var(--surface);stroke:var(--line-soft);stroke-width:1.5}
+  .band.s{fill:var(--surface-2)}
   .bandlbl{font-size:12px;font-weight:700;letter-spacing:.14em;fill:var(--muted)}
-  .tier{fill:#fff;stroke:#CBD3D7;stroke-width:1.5}
+  .tier{fill:var(--surface);stroke:var(--line);stroke-width:1.5}
   .tierT{font-size:16px;font-weight:700;fill:var(--ink)}
   .tierD{font-size:11.5px;fill:var(--muted)}
-  .chip{fill:#EEF1F3}
+  .chip{fill:var(--chip)}
   .chipT{font-size:10.5px;font-weight:700;fill:var(--muted);letter-spacing:.06em}
-  .node rect{transition:fill .25s,stroke .25s}
-  .pg rect{fill:var(--navy)}
+  .node rect{transition:fill var(--dur-state) var(--ease-quart),stroke var(--dur-state) var(--ease-quart)}
+  .pg rect{fill:var(--pg)}
   .pg .nt{fill:#fff;font-size:20px;font-weight:700;text-anchor:middle}
-  .pg .ns{fill:#B9C6CB;font-size:12.5px;text-anchor:middle}
-  .pg.idle rect{fill:#AEB9BE}
-  .pg.idle.active rect{fill:var(--navy)}
-  .sn rect{fill:#F7F8F9;stroke:#CBD3D7;stroke-width:1.2}
+  .pg .ns{fill:var(--pg-sub);font-size:12.5px;text-anchor:middle}
+  .pg.idle rect{fill:var(--pg-idle)}
+  .pg.idle.active rect{fill:var(--pg)}
+  .flash.pg rect{fill:var(--pg-flash)}
+  /* storage / lakehouse nodes: --fc is the flash color for the node */
+  .sn{--fc:var(--lava)} .sn.blue{--fc:var(--blue)} .sn.purple{--fc:var(--purple)} .sn.teal{--fc:var(--teal)} .sn.rt{--fc:var(--rt)}
+  .sn rect{fill:var(--node);stroke:var(--line);stroke-width:1.2}
   .sn text{font-size:12px;fill:var(--ink);text-anchor:middle}
   .sn .bt{font-size:13px;font-weight:700}
   .sn .small{font-size:10px;fill:var(--muted)}
-  .seg rect{fill:#F7F8F9;stroke:#CBD3D7;stroke-dasharray:4 3}
-  .seg text{font-size:12.5px;fill:var(--ink);text-anchor:middle;font-weight:600}
+  .flash.sn rect{fill:color-mix(in srgb,var(--fc) 16%,var(--node));stroke:var(--fc)}
+  .seg{--fc:var(--yellow)} .seg.green{--fc:var(--green)} .seg.indigo{--fc:var(--indigo)}
+  .seg rect{fill:var(--node);stroke:var(--line);stroke-dasharray:4 3}
+  .seg text{font-size:12.5px;fill:var(--ink);text-anchor:middle;font-weight:500}
   .seg .small{font-size:10.5px;fill:var(--muted);font-weight:400}
-  .flash.pg rect{fill:#2C4D59}
-  .flash.sn rect{fill:#FFE9E5;stroke:var(--lava)}
-  .flash.sn.blue rect{fill:#E3EEF8;stroke:var(--blue)}
-  .flash.sn.purple rect{fill:#EFE8FC;stroke:var(--purple)}
-  .flash.sn.teal rect{fill:#DDF3F3;stroke:var(--teal)}
-  .flash.seg rect{fill:#FFF4DB;stroke:var(--yellow);stroke-dasharray:none}
-  .flash.seg.green rect{fill:#DDF5EC;stroke:var(--green)}
-  .flash.seg.indigo rect{fill:#E6E9FB;stroke:var(--indigo)}
-  .flash.sn.rt rect{fill:#FDEBDD;stroke:var(--rt)}
-  .flash.sn.rt rect{fill:#FDEBDD;stroke:var(--rt)}
-  .flow{fill:none;stroke:var(--gray);stroke-width:2;marker-end:url(#ah-gray);transition:stroke .3s,stroke-width .3s,opacity .3s;opacity:.75}
+  .flash.seg rect{fill:color-mix(in srgb,var(--fc) 16%,var(--node));stroke:var(--fc);stroke-dasharray:none}
+  .flow{fill:none;stroke:var(--flow-idle);stroke-width:2;marker-end:url(#ah-gray);opacity:.75;transition:stroke var(--dur-state) var(--ease-quart),stroke-width var(--dur-state) var(--ease-quart),opacity var(--dur-state) var(--ease-quart)}
   .flow.ack{stroke-dasharray:5 4}
   .flow.on{opacity:1;stroke-width:3}
   .flow.on.wal{stroke:var(--lava);marker-end:url(#ah-wal)}
@@ -54,42 +87,45 @@
   .flow.on.cdf{stroke:var(--teal);marker-end:url(#ah-cdf)}
   .flow.on.dr{stroke:var(--indigo);marker-end:url(#ah-dr)}
   .flow.on.rt{stroke:var(--rt);marker-end:url(#ah-rt)}
-  .flow.on.rt{stroke:var(--rt);marker-end:url(#ah-rt)}
-  .flow.on.q{stroke:var(--navy);marker-end:url(#ah-q)}
-  .node.cp rect{fill:#EEF1F3;stroke:#1B3139;stroke-width:1.5}
-  .flash.cp rect{fill:#FFE9E5;stroke:var(--lava)}
-  .tiny{font-size:9.5px;fill:#8A9AA0}
-  .dns{font-size:8.5px;fill:var(--muted)}
-  .topbox{fill:#20293A;stroke:#44526A;stroke-width:1.2}
-  .toplabel{font-size:12px;font-weight:700;letter-spacing:.14em;fill:#98A7BC}
-  .tophead{font-size:17px;font-weight:700;fill:#AEB8C8;text-anchor:middle}
-  .topsub{font-size:14px;font-weight:700;fill:#35C2FF}
-  .clientChip rect{fill:#1A2232;stroke:#5D6B83;stroke-width:1.2}
-  .clientChip text{font-size:10.8px;fill:#E6EDF7;text-anchor:middle;font-weight:700;letter-spacing:.02em}
-  .clientChip.green rect{stroke:#20E382}
-  .clientChip.green text{fill:#20E382}
-  .clientChip.magenta rect{stroke:#FF36F7}
-  .clientChip.magenta text{fill:#FF36F7}
-  .domain{font-size:11.8px;fill:#D7DEE8;text-anchor:middle;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono",monospace}
+  .flow.on.q{stroke:var(--q);marker-end:url(#ah-q)}
+  .m-idle{fill:var(--flow-idle)} .m-q{fill:var(--q)}
+  .foot{font-size:11px;fill:var(--faint)}
+  /* control plane (always navy) */
+  .topbox{fill:var(--cp-bg);stroke:var(--cp-line);stroke-width:1.2}
+  .toplabel{font-size:12px;font-weight:700;letter-spacing:.14em;fill:var(--cp-muted)}
+  .tophead{font-size:17px;font-weight:700;fill:var(--cp-text);text-anchor:middle}
+  .topsub{font-size:14px;font-weight:500;fill:var(--cp-ro)}
+  .clientChip{--fc:var(--lava)} .clientChip.green{--fc:var(--cp-rw)} .clientChip.api{--fc:var(--cp-api)}
+  .clientChip rect{fill:var(--cp-chip);stroke:var(--cp-chip-line);stroke-width:1.2}
+  .clientChip text{font-size:10.8px;fill:var(--cp-text);text-anchor:middle;font-weight:700;letter-spacing:.02em}
+  .clientChip.green rect,.clientChip.api rect{stroke:var(--fc)}
+  .clientChip.green text,.clientChip.api text{fill:var(--fc)}
+  .flash.clientChip rect{fill:color-mix(in srgb,var(--fc) 28%,var(--cp-chip));stroke:var(--fc)}
+  .domain,.epText{font-family:var(--font-mono)}
+  .domain{font-size:11.8px;fill:var(--cp-muted);text-anchor:middle}
   .epHead{font-size:11px;font-weight:700;letter-spacing:.03em}
-  .epHead.rw{fill:#20E382}
-  .epHead.ro{fill:#35C2FF}
-  .epHead.mid{fill:#AEB8C8;text-anchor:middle}
-  .epText{font-size:10.2px;fill:#E6EDF7;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono",monospace}
+  .epHead.rw{fill:var(--cp-rw)}
+  .epHead.ro{fill:var(--cp-ro)}
+  .epHead.mid{fill:var(--cp-muted);text-anchor:middle}
+  .epText{font-size:10.2px;fill:var(--cp-text)}
   .epText.sm{font-size:8.9px}
-  .epText.magenta{fill:#FF36F7}
-  .epMid{font-size:11px;font-weight:700;fill:#F6F8FB;text-anchor:middle}
-  .epMid.small{font-size:10px;font-weight:600;fill:#AEB8C8}
-  #bouncer .poolTag{fill:#273246;stroke:#56657E;stroke-width:1}
-  #bouncer.flash .poolTag{fill:#FFE9E5;stroke:var(--lava);stroke-width:1.4}
-  #ro-ep .robg{fill:none;stroke:none}
-  #ro-ep.flash .robg{fill:#273B56;stroke:#35C2FF;stroke-width:1.2}
-  .lbl{font-size:12.5px;font-weight:700;fill:var(--muted);paint-order:stroke;stroke:#F1F3F4;stroke-width:5px;stroke-linejoin:round}
-  .lbl.w{stroke:#fff}
-  .lbl.o{stroke:#F9F7F4}
-  .badge{opacity:0;transition:opacity .3s}
-  .badge.show{opacity:1}
-  .badge rect{fill:var(--navy)}
+  .epText.api{fill:var(--cp-api)}
+  .epMid{font-size:11px;font-weight:700;fill:var(--cp-text);text-anchor:middle}
+  .epMid.small{font-size:10px;font-weight:500;fill:var(--cp-muted)}
+  .epMid.api{fill:var(--cp-api)}
+  .epMid.halo{paint-order:stroke;stroke:var(--cp-bg);stroke-width:4px;stroke-linejoin:round}
+  #bouncer .poolTag{fill:var(--cp-chip);stroke:var(--cp-chip-line);stroke-width:1;transition:fill var(--dur-state) var(--ease-quart),stroke var(--dur-state) var(--ease-quart)}
+  #bouncer.flash .poolTag{fill:color-mix(in srgb,var(--lava) 28%,var(--cp-chip));stroke:var(--lava);stroke-width:1.4}
+  #ro-ep .robg{fill:transparent;stroke:transparent;transition:fill var(--dur-state) var(--ease-quart),stroke var(--dur-state) var(--ease-quart)}
+  #ro-ep.flash .robg{fill:color-mix(in srgb,var(--cp-ro) 18%,var(--cp-bg));stroke:var(--cp-ro);stroke-width:1.2}
+  /* flow labels get a halo matching what they sit on */
+  .lbl{font-size:12.5px;font-weight:700;fill:var(--muted);paint-order:stroke;stroke:var(--surface-2);stroke-width:5px;stroke-linejoin:round}
+  .lbl.w{stroke:var(--surface)}
+  .lbl.o{stroke:var(--stage)}
+  /* badges: rise in on enter, exit ~75% of enter duration */
+  .badge{opacity:0;transform:translateY(4px);transition:opacity 190ms var(--ease-quart),transform 190ms var(--ease-quart)}
+  .badge.show{opacity:1;transform:none;transition-duration:var(--dur-state)}
+  .badge rect{fill:var(--badge)}
   .badge.lava rect{fill:var(--lava)}
   .badge.green rect{fill:var(--green)}
   .badge.blue rect{fill:var(--blue)}
@@ -98,37 +134,49 @@
   .badge.teal rect{fill:var(--teal)}
   .badge.indigo rect{fill:var(--indigo)}
   .badge.rt rect{fill:var(--rt)}
-  .badge.rt rect{fill:var(--rt)}
   .badge text{fill:#fff;font-size:12px;font-weight:700;text-anchor:middle}
-  /* phased reveal */
-  .reveal{opacity:0;transition:opacity .8s;pointer-events:none}
+  /* packets: white rim becomes the surface color in dark mode */
+  #packets [stroke],#packets-core [stroke]{stroke:var(--surface)}
+  /* phased reveal: new layers fade in as the story adds them */
+  .reveal{opacity:0;transition:opacity var(--dur-layout) var(--ease-quart);pointer-events:none}
   .reveal.shown{opacity:1}
   .reveal.shown.stopped{opacity:.35}
-  #core{transition:transform 1.2s cubic-bezier(.4,0,.2,1),opacity .6s;transform-origin:0 0;transform-box:view-box}
+  #core{transition:transform var(--dur-entrance) var(--ease-quint),opacity var(--dur-layout) var(--ease-quart);transform-origin:0 0;transform-box:view-box}
   #core.down{opacity:.35}
   /* the snapshot route is only drawn while snapshot mode is playing */
   #p-snap:not(.on), #p-snap:not(.on) + text{opacity:0}
-  #p-snap + text{transition:opacity .3s}
-  .foot{font-size:11px;fill:#8A9AA0}
+  #p-snap + text{transition:opacity var(--dur-state) var(--ease-quart)}
   /* HTML overlays */
-  #panel{position:absolute;left:1010px;top:110px;width:240px;height:700px;background:#fff;border:1.5px solid #DCE0E2;border-radius:14px;padding:14px 14px 10px;box-sizing:border-box;color:var(--ink);display:flex;flex-direction:column}
-  #panel .k{font-size:10.5px;letter-spacing:.12em;font-weight:700;color:var(--lava)}
+  #panel{position:absolute;left:1010px;top:110px;width:240px;height:700px;background:var(--surface);border:1.5px solid var(--line-soft);border-radius:14px;padding:14px 14px 10px;box-sizing:border-box;color:var(--ink);display:flex;flex-direction:column}
+  #panel .k{font-size:10.5px;letter-spacing:.12em;font-weight:700;color:var(--muted)}
   #panel h3{margin:6px 0 6px;font-size:17px;line-height:1.2}
-  #panel p{margin:0 0 6px;font-size:12.5px;line-height:1.42;color:#3C5560;min-height:124px}
-  #stepsrc{font-size:10.5px;color:#8A9AA0;font-style:italic;margin-bottom:8px;min-height:28px}
-  #steps{list-style:none;margin:0;padding:6px 0 0;border-top:1px solid #EEF1F3;overflow:auto;position:relative}
-  #steps li{font-size:11.5px;padding:2px 6px;border-radius:6px;cursor:pointer;color:var(--muted);display:flex;gap:6px;line-height:1.35}
-  #steps li b{color:var(--gray);width:18px;flex:none}
-  #steps li.ph{cursor:default;font-size:9.5px;letter-spacing:.12em;font-weight:700;color:#8A9AA0;padding-top:6px;text-transform:uppercase}
-  #steps li.cur{background:#FFF0ED;color:var(--ink);font-weight:700}
+  #panel p{margin:0 0 6px;font-size:12.5px;line-height:1.42;color:var(--muted);min-height:124px}
+  #stepsrc{font-size:10.5px;color:var(--faint);font-style:italic;margin-bottom:8px;min-height:28px}
+  /* step change: the narration rises in so the eye catches the new step */
+  .enter{animation:rise var(--dur-state) var(--ease-quart) both}
+  #stepp.enter{animation-delay:50ms} #stepsrc.enter{animation-delay:100ms}
+  @keyframes rise{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+  #panel > *{flex:none}
+  #steps{flex:1 1 auto;min-height:0;list-style:none;margin:0;padding:6px 0 0;border-top:1px solid var(--line-soft);overflow:auto;position:relative}
+  #steps li{font-size:11.5px;padding:2px 6px;border-radius:6px;cursor:pointer;color:var(--muted);display:flex;gap:6px;line-height:1.35;transition:background var(--dur-instant) var(--ease-quart),color var(--dur-instant) var(--ease-quart)}
+  #steps li:not(.ph):hover{background:var(--surface-2)}
+  #steps li b{color:var(--faint);width:18px;flex:none}
+  #steps li.ph{cursor:default;font-size:9.5px;letter-spacing:.12em;font-weight:700;color:var(--faint);padding-top:6px;text-transform:uppercase}
+  #steps li.cur{background:color-mix(in srgb,var(--lava) 10%,var(--surface));color:var(--ink);font-weight:700}
   #steps li.cur b{color:var(--lava)}
   #controls{position:absolute;left:40px;top:836px;display:flex;gap:8px;align-items:center}
-  #controls button,#controls select{font:600 12.5px "DM Sans",Inter,Arial,sans-serif;border:1.5px solid #CBD3D7;background:#fff;color:var(--ink);border-radius:8px;padding:6px 12px;cursor:pointer}
-  #controls button:hover{border-color:var(--navy)}
-  #controls #play{background:var(--navy);color:#fff;border-color:var(--navy);min-width:84px}
-  #legend{display:flex;gap:11px;margin-left:10px;font-size:11.5px;color:var(--muted)}
+  #controls button,#controls select{font:500 12.5px var(--font);border:1.5px solid var(--line);background:var(--surface);color:var(--ink);border-radius:8px;padding:6px 12px;cursor:pointer;transition:border-color var(--dur-instant) var(--ease-quart),background var(--dur-instant) var(--ease-quart),transform var(--dur-instant) var(--ease-quart)}
+  #controls button:hover,#controls select:hover{border-color:var(--ink)}
+  #controls button:active{transform:translateY(1px)}
+  #controls button:focus-visible,#controls select:focus-visible{outline:2px solid var(--lava);outline-offset:2px}
+  #controls #play{background:var(--ink);color:var(--stage);border-color:var(--ink);min-width:84px}
+  #legend{display:flex;gap:9px;margin-left:6px;font-size:11.5px;color:var(--muted)}
   #legend span::before{content:"";display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:5px;vertical-align:-1px;background:var(--c)}
-  #bar{position:absolute;left:0;top:0;height:4px;background:var(--lava);width:0}
+  /* step progress: scaleX, not width, so it never triggers layout */
+  #bar{position:absolute;left:0;top:0;height:4px;width:100%;background:var(--lava);transform:scaleX(0);transform-origin:0 0}
+  @media (prefers-reduced-motion: reduce){
+    *,*::before,*::after{animation-duration:.01ms!important;animation-delay:0ms!important;transition-duration:.01ms!important}
+  }
 </style>
 </head>
 <body>
@@ -136,8 +184,8 @@
 <div id="bar"></div>
 <svg id="svg" viewBox="0 0 1280 880" xmlns="http://www.w3.org/2000/svg">
   <defs>
-    <marker id="ah-gray" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#C3CBD0"/></marker>
-    <marker id="ah-q" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#1B3139"/></marker>
+    <marker id="ah-gray" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="m-idle"/></marker>
+    <marker id="ah-q" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="m-q"/></marker>
     <marker id="ah-wal" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#FF3621"/></marker>
     <marker id="ah-page" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#2272B4"/></marker>
     <marker id="ah-layer" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#FFAB00"/></marker>
@@ -145,7 +193,6 @@
     <marker id="ah-sync" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#7A4FD6"/></marker>
     <marker id="ah-cdf" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#0B8F8F"/></marker>
     <marker id="ah-dr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#4F5FD8"/></marker>
-    <marker id="ah-rt" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#D9480F"/></marker>
     <marker id="ah-rt" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#D9480F"/></marker>
   </defs>
 
@@ -173,7 +220,7 @@
     <g id="cli-go" class="node sn clientChip"><rect x="610" y="92" width="36" height="28" rx="7"/><text x="628" y="110">Go</text></g>
     <g id="cli-rust" class="node sn clientChip"><rect x="654" y="92" width="46" height="28" rx="7"/><text x="677" y="110">Rust</text></g>
     <g id="cli-ccpp" class="node sn clientChip"><rect x="708" y="92" width="56" height="28" rx="7"/><text x="736" y="110">C/C++</text></g>
-    <g id="cli-dataapi" class="node sn clientChip magenta"><rect x="772" y="92" width="168" height="28" rx="7"/><text x="856" y="110">Data API (PostgREST)</text></g>
+    <g id="cli-dataapi" class="node sn clientChip api"><rect x="772" y="92" width="168" height="28" rx="7"/><text x="856" y="110">Data API (PostgREST)</text></g>
     <text x="515" y="138" class="domain">.database.&lt;region&gt;.cloud.databricks.com</text>
     <path id="p-cli-1" class="flow q" d="M 84 120 C 84 166, 300 194, 515 226"/>
     <path id="p-cli-2" class="flow q" d="M 205 120 C 205 170, 360 198, 515 226"/>
@@ -186,25 +233,25 @@
     <g id="rw-ep">
       <text x="72" y="211" class="epText">ep-&lt;primary-endpoint-id&gt;</text>
       <text x="72" y="230" class="epText">ep-&lt;primary-endpoint-id&gt;-pooler</text>
-      <text x="72" y="247" class="epText magenta sm">ep-&lt;primary-endpoint-id&gt;/&lt;domain&gt;/api/2.0</text>
-      <text x="72" y="259" class="epText magenta sm">/workspace/&lt;workspace-id&gt;/rest/&lt;pgdatabase&gt;</text>
+      <text x="72" y="247" class="epText api sm">ep-&lt;primary-endpoint-id&gt;/&lt;domain&gt;/api/2.0</text>
+      <text x="72" y="259" class="epText api sm">/workspace/&lt;workspace-id&gt;/rest/&lt;pgdatabase&gt;</text>
     </g>
     <text x="515" y="211" class="epMid">Direct Connection</text>
+    <path id="p-bc" class="flow q" d="M 515 226 C 515 246, 380 246, 270 270"/>
     <g id="bouncer">
-      <rect x="444" y="218" width="142" height="24" rx="8" class="poolTag"/>
-      <text x="515" y="233" class="epMid">Connection pooling</text>
-      <text x="515" y="244" class="epMid small">(PgBouncer)</text>
+      <rect x="444" y="217" width="142" height="31" rx="8" class="poolTag"/>
+      <text x="515" y="231" class="epMid">Connection pooling</text>
+      <text x="515" y="243" class="epMid small">(PgBouncer)</text>
     </g>
-    <text x="515" y="255" class="epMid" style="fill:#FF36F7">Data API</text>
+    <text x="515" y="257" class="epMid api halo">Data API</text>
     <g id="ro-ep" class="reveal" data-level="2">
       <rect x="680" y="188" width="286" height="74" rx="10" class="robg"/>
       <text x="742" y="184" class="epHead ro">READ-ONLY (R/O)</text>
       <text x="694" y="211" class="epText">ep-&lt;replica-endpoint-id&gt;-ro</text>
       <text x="694" y="230" class="epText">ep-&lt;replica-endpoint-id&gt;-ro-pooler</text>
-      <text x="694" y="247" class="epText magenta sm">ep-&lt;secondary-endpoint-id&gt;/&lt;domain&gt;/api/2.0</text>
-      <text x="694" y="259" class="epText magenta sm">/workspace/&lt;workspace-id&gt;/rest/&lt;pgdatabase&gt;</text>
+      <text x="694" y="247" class="epText api sm">ep-&lt;secondary-endpoint-id&gt;/&lt;domain&gt;/api/2.0</text>
+      <text x="694" y="259" class="epText api sm">/workspace/&lt;workspace-id&gt;/rest/&lt;pgdatabase&gt;</text>
     </g>
-    <path id="p-bc" class="flow q" d="M 515 226 C 515 246, 380 246, 270 270"/>
     <g id="b-bc" class="badge"><rect x="348" y="150" width="334" height="24" rx="12"/><text x="515" y="166"></text></g>
   </g>
 
@@ -289,16 +336,16 @@
 
   <!-- ===================== PHASE 3a: Lakehouse / Unity Catalog + Synced tables ===================== -->
   <g id="lh-sync" class="reveal" data-level="3">
-    <rect x="668" y="110" width="322" height="526" rx="14" class="band"/>
-    <text x="686" y="131" class="bandlbl">LAKEHOUSE · UNITY CATALOG</text>
-    <g id="pipe" class="node sn purple"><rect x="688" y="140" width="282" height="46" rx="9"/><text x="829" y="159" class="bt">Synced table pipeline</text><text x="829" y="176" class="small">managed Lakeflow · snapshot / triggered / continuous</text></g>
+    <rect x="668" y="124" width="322" height="512" rx="14" class="band"/>
+    <text x="686" y="144" class="bandlbl">LAKEHOUSE · UNITY CATALOG</text>
+    <g id="pipe" class="node sn purple"><rect x="688" y="152" width="282" height="46" rx="9"/><text x="829" y="171" class="bt">Synced table pipeline</text><text x="829" y="188" class="small">managed Lakeflow · snapshot / triggered / continuous</text></g>
     <g id="uc-src" class="node sn purple"><rect x="688" y="222" width="282" height="46" rx="9"/><text x="829" y="241" class="bt">analytics.gold.user_profiles</text><text x="829" y="258" class="small">UC source · Delta, Iceberg or view</text></g>
-    <path id="p-sync-src" class="flow sync" d="M 829 222 L 829 188"/>
-    <path id="p-sync" class="flow sync" d="M 688 163 L 654 163 L 654 266 L 214 266 Q 200 266 200 280 L 200 293"/>
-    <text x="838" y="210" class="lbl w">↑ sync</text>
-    <text x="640" y="244" class="lbl o" text-anchor="end">← synced rows into Postgres</text>
+    <path id="p-sync-src" class="flow sync" d="M 829 222 L 829 200"/>
+    <path id="p-sync" class="flow sync" d="M 688 175 L 654 175 L 654 266 L 214 266 Q 200 266 200 280 L 200 293"/>
+    <text x="838" y="214" class="lbl w">↑ sync</text>
+    <text id="t-sync" x="330" y="284" class="lbl w" text-anchor="middle">← synced rows into Postgres</text>
     <!-- Snapshot mode: bulk write straight into the layer files (routed below the core), then one transaction via the primary -->
-    <path id="p-snap" class="flow sync" d="M 688 176 L 678 176 L 678 644 L 172 644 L 172 621"/>
+    <path id="p-snap" class="flow sync" d="M 688 188 L 678 188 L 678 644 L 172 644 L 172 621"/>
     <text x="420" y="658" class="lbl o" text-anchor="middle">↑ snapshot: bulk write to layer files</text>
   </g>
 
@@ -336,7 +383,7 @@
   </g>
 
   <!-- Global badges (kept outside the dimmable groups) -->
-  <g id="b-pipe" class="badge"><rect x="689" y="128" width="280" height="24" rx="12"/><text x="829" y="144"></text></g>
+  <g id="b-pipe" class="badge"><rect x="689" y="278" width="280" height="24" rx="12"/><text x="829" y="294"></text></g>
   <g id="b-cdf"  class="badge"><rect x="689" y="444" width="280" height="24" rx="12"/><text x="829" y="460"></text></g>
   <g id="b-hist" class="badge"><rect x="689" y="540" width="280" height="24" rx="12"/><text x="829" y="556"></text></g>
   <g id="b-sec"  class="badge"><rect x="55" y="680" width="300" height="24" rx="12"/><text x="205" y="696"></text></g>
@@ -345,11 +392,11 @@
 
   <g id="packets"></g>
 
-  <text x="1250" y="864" class="foot" text-anchor="end">© 2026 Databricks Inc. — All rights reserved</text>
+  <text x="1250" y="874" class="foot" text-anchor="end">© 2026 Databricks Inc. — All rights reserved</text>
 </svg>
 
 <div id="panel">
-  <div class="k" id="stepk"><span style="--c:#D9480F">Lakehouse//RT</span></div>
+  <div class="k" id="stepk"></div>
   <h3 id="steph"></h3>
   <p id="stepp"></p>
   <div id="stepsrc"></div>
@@ -362,7 +409,8 @@
   <button id="next" title="Next step (→)">Next ▶</button>
   <select id="speed" title="Speed"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="1.5">1.5×</option><option value="2">2×</option></select>
   <button id="auto" title="Auto-advance steps">Auto: on</button>
-  <div id="legend"><span style="--c:#1B3139">Queries</span><span style="--c:#FF3621">WAL</span><span style="--c:#2272B4">Pages</span><span style="--c:#FFAB00">Layers</span><span style="--c:#00A972">Parquet/ack</span><span style="--c:#7A4FD6">Synced rows</span><span style="--c:#0B8F8F">CDF</span><span style="--c:#4F5FD8">DR</span><span style="--c:#D9480F">Lakehouse//RT</span></div>
+  <button id="theme" title="Switch light / dark theme (t)">Dark</button>
+  <div id="legend"><span style="--c:var(--q)">Queries</span><span style="--c:#FF3621">WAL</span><span style="--c:#2272B4">Pages</span><span style="--c:#FFAB00">Layers</span><span style="--c:#00A972">Parquet/ack</span><span style="--c:#7A4FD6">Synced rows</span><span style="--c:#0B8F8F">CDF</span><span style="--c:#4F5FD8">DR</span><span style="--c:#D9480F">Lakehouse//RT</span></div>
 </div>
 </div>
 
@@ -380,25 +428,26 @@
   let timers = [], packets = [], stageIdx = 0, stageStart = 0, stageDur = 1, cdfBuf = 0;
   const after = (ms, fn) => timers.push({at: simT + ms, fn});
   const every = (ms, total, fn) => { for (let t = 0; t < total; t += ms) after(t, fn); };
-  const ease = t => t < .5 ? 2*t*t : 1 - Math.pow(-2*t + 2, 2)/2;
+  const ease = t => 1 - Math.pow(1 - t, 4);   // brand ease-out-quart
+  const RM = matchMedia('(prefers-reduced-motion: reduce)');
 
-  const COLORS = {wal:'#FF3621', page:'#2272B4', layer:'#FFAB00', pq:'#00A972', ack:'#00A972', sync:'#7A4FD6', sbatch:'#7A4FD6', cdf:'#0B8F8F', batch:'#0B8F8F', dr:'#4F5FD8', rt:'#D9480F', q:'#1B3139'};
+  const COLORS = {wal:'#FF3621', page:'#2272B4', layer:'#FFAB00', pq:'#00A972', ack:'#00A972', sync:'#7A4FD6', sbatch:'#7A4FD6', cdf:'#0B8F8F', batch:'#0B8F8F', dr:'#4F5FD8', rt:'#D9480F', q:'var(--q)'};
   function makeShape(kind){
     const g = document.createElementNS(NS, 'g');
     const c = COLORS[kind];
     if (kind === 'wal' || kind === 'ack' || kind === 'cdf') {
       const e = document.createElementNS(NS, 'circle');
-      e.setAttribute('r', kind === 'wal' ? 7 : 6); e.setAttribute('fill', c);
+      e.setAttribute('r', kind === 'wal' ? 7 : 6); e.style.fill = c;
       e.setAttribute('stroke', '#fff'); e.setAttribute('stroke-width', 2); g.appendChild(e);
     } else if (kind === 'pq') {
       for (let i = 0; i < 3; i++) { const r = document.createElementNS(NS, 'rect');
         r.setAttribute('x', -8 + i*5.5); r.setAttribute('y', -8); r.setAttribute('width', 4.5); r.setAttribute('height', 16); r.setAttribute('rx', 1);
-        r.setAttribute('fill', c); g.appendChild(r); }
+        r.style.fill = c; g.appendChild(r); }
     } else {
       const big = kind === 'batch' || kind === 'sbatch';
       const r = document.createElementNS(NS, 'rect');
       r.setAttribute('x', big ? -12 : -9); r.setAttribute('y', big ? -9 : -7); r.setAttribute('width', big ? 24 : 18); r.setAttribute('height', big ? 18 : 14); r.setAttribute('rx', 2.5);
-      r.setAttribute('fill', c); r.setAttribute('stroke', '#fff'); r.setAttribute('stroke-width', 1.5); g.appendChild(r);
+      r.style.fill = c; r.setAttribute('stroke', '#fff'); r.setAttribute('stroke-width', 1.5); g.appendChild(r);
     }
     return g;
   }
@@ -406,7 +455,7 @@
   function send(pathId, kind, dur, opts = {}){
     const path = $(pathId); const el = makeShape(kind);
     (path.closest('#core') ? $('packets-core') : $('packets')).appendChild(el);
-    const p = {path, el, len: path.getTotalLength(), start: simT, dur, onArrive: opts.onArrive};
+    const p = {path, el, len: path.getTotalLength(), start: simT, dur: RM.matches ? 1 : dur, onArrive: opts.onArrive};
     place(p, 0); packets.push(p);
   }
   function place(p, t){ const pt = p.path.getPointAtLength(p.len * ease(t)); p.el.setAttribute('transform', `translate(${pt.x},${pt.y})`); }
@@ -423,7 +472,7 @@
       place(p, t);
     }
     packets = packets.filter(p => !p.done);
-    $('bar').style.width = Math.min(100, (simT - stageStart) / stageDur * 100) + '%';
+    $('bar').style.transform = `scaleX(${Math.min(1, (simT - stageStart) / stageDur)})`;
   }
   function frame(now){ const dt = Math.min(now - last, 50); last = now; if (playing) { simT += dt * speed; tick(); } requestAnimationFrame(frame); }
 
@@ -607,12 +656,7 @@
         after(10000, () => pageRead(2, 'SELECT \u2026 user_profiles_synced')); after(21000, () => pageRead(2, 'SELECT \u2026 user_profiles_synced'));
       } },
 
-    { ph: P3D, lv: 6, t: 'Lakehouse//RT: OLAP on Parquet', on: [...WRITE,'p-sk-ps','p-parquet','p-rt-1','p-rt-2'], dur: 14000, src: S.rt,
-      d: 'Lakehouse//RT, powered by the Reyden engine, runs read-only OLAP queries (sums, aggregates) on the Parquet copy of Lakebase data, with millisecond-to-sub-second latency at high concurrency. Nothing is copied out, and the primary Postgres compute is not involved, so OLTP is unaffected.',
-      run(){ every(2600, 12000, () => commit()); every(600, 12500, streamWal); after(800, () => every(1300, 12500, flushParquet));
-             after(1500, () => every(3200, 12000, rtQuery)); } },
-
-    { ph: PALL, lv: 6, t: 'Lakebase CDF', on: [...WRITE,'p-cdf-1','p-cdf-2'], dur: 10500, src: S.cdf,
+    { ph: P3B, lv: 4, t: 'Lakebase CDF', on: [...WRITE,'p-cdf-1','p-cdf-2'], dur: 10500, src: S.cdf,
       d: 'Lakebase CDF captures every insert, update and delete from the WAL and appends it to a Unity Catalog managed Delta table, lb_<table>_history, batched about every 15 seconds (time compressed here).',
       run(){ after(1200, () => { every(1800, 8400, () => commit()); after(1500, () => every(700, 7400, cdfChange)); after(3600, () => every(2600, 5800, cdfFlush)); }); } },
 
@@ -666,6 +710,7 @@
     document.querySelectorAll('.flow').forEach(p => p.classList.toggle('on', on.includes(p.id)));
     $('stepk').textContent = `${s.ph.toUpperCase()} \u00b7 STEP ${s.label} OF ${TOTAL}`;
     $('steph').textContent = s.t; $('stepp').textContent = s.d; $('stepsrc').textContent = 'Source: ' + s.src;
+    ['steph','stepp','stepsrc'].forEach(id => { const n = $(id); n.classList.remove('enter'); void n.offsetWidth; n.classList.add('enter'); });
     items.forEach((li, k) => li.classList.toggle('cur', k === stageIdx));
     // keep the current step visible without scrolling the parent page
     const li = items[stageIdx];
@@ -683,8 +728,17 @@
   $('prev').onclick = () => go(stageIdx - 1);
   $('speed').onchange = e => speed = parseFloat(e.target.value);
   $('auto').onclick = () => { auto = !auto; $('auto').textContent = 'Auto: ' + (auto ? 'on' : 'off'); if (auto && !timers.length) go(stageIdx + 1); };
+  const root = document.documentElement;
+  const showTheme = () => $('theme').textContent = root.dataset.theme === 'dark' ? 'Light' : 'Dark';
+  const toggleTheme = () => { root.dataset.theme = root.dataset.theme === 'dark' ? 'light' : 'dark';
+    try { localStorage.setItem('lb-theme', root.dataset.theme); } catch (e) {} showTheme(); };
+  $('theme').onclick = toggleTheme; showTheme();
+  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', e => {
+    let saved; try { saved = localStorage.getItem('lb-theme'); } catch (_) {}
+    if (!saved) { root.dataset.theme = e.matches ? 'dark' : 'light'; showTheme(); } });
   addEventListener('keydown', e => {
-    if (e.code === 'Space') { e.preventDefault(); setPlay(!playing); }
+    if (e.key === 't' || e.key === 'T') toggleTheme();
+    else if (e.code === 'Space') { e.preventDefault(); setPlay(!playing); }
     else if (e.key === 'ArrowRight') go(stageIdx + 1);
     else if (e.key === 'ArrowLeft') go(stageIdx - 1);
   });
